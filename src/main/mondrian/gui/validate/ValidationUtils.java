@@ -417,11 +417,11 @@ public class ValidationUtils {
                                 factTable.name,
                                 column))
                             {
-                                // Check for aggregator type only if column exists
-                                // in table.
+                                // Check for aggregator type only if column
+                                // exists in table.
 
-                                // Check if aggregator selected is valid on the data
-                                // type of the column selected.
+                                // Check if aggregator selected is valid on
+                                // the data type of the column selected.
                                 int colType =
                                     jdbcValidator.getColumnDataType(
                                         factTable.schema,
@@ -437,8 +437,8 @@ public class ValidationUtils {
                                     || "avg".equals(
                                         measure.aggregator))
                                 {
-                                    // aggregator = sum or avg, column should be
-                                    // numeric
+                                    // aggregator = sum or avg, column should
+                                    // be numeric
                                     agIndex = 0;
                                 }
                                 if (!(agIndex == -1
