@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2006-2010 Julian Hyde
+// Copyright (C) 2006-2011 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -1339,7 +1339,8 @@ public class SchemaTest extends FoodMartTestCase {
             + "         <![CDATA[select * from `inventory_fact_1997` as `FOOBAR`]]>\n"
             + "        </SQL>\n"
             + "      </View>\n"
-            + "      <Level name=\"Warehouse ID\" column=\"warehouse_id\" uniqueMembers=\"true\"/>\n"
+            + "      <Level name=\"Warehouse ID\" column=\"warehouse_id\"\n"
+            + "          uniqueMembers=\"true\" type=\"Numeric\"/>\n"
             + "    </Hierarchy>\n"
             + "  </Dimension>\n"
             + "  <Measure name=\"Warehouse Cost\" column=\"warehouse_cost\" aggregator=\"sum\"/>\n"
@@ -3013,6 +3014,26 @@ public class SchemaTest extends FoodMartTestCase {
             assertEquals(nameVal[i++], entry.getKey());
             assertEquals(nameVal[i++], entry.getValue().getValue());
         }
+    }
+
+    public void testCaption() {
+        final TestContext testContext = TestContext.createSubstitutingCube(
+            "Sales",
+            "  <Dimension name=\"Gender2\" foreignKey=\"customer_id\">\n"
+            + "    <Hierarchy hasAll=\"true\" primaryKey=\"customer_id\" >\n"
+            + "      <Table name=\"customer\"/>\n"
+            + "      <Level name=\"Gender\" column=\"gender\" uniqueMembers=\"true\" >\n"
+            + "        <CaptionExpression>\n"
+            + "          <SQL dialect='generic'>'foobar'</SQL>\n"
+            + "        </CaptionExpression>\n"
+            + "      </Level>\n"
+            + "    </Hierarchy>\n"
+            + "  </Dimension>");
+        Result result = testContext.executeQuery(
+            "select {[Gender2].Children} on columns from [Sales]");
+        assertEquals(
+            "foobar",
+            result.getAxes()[0].getPositions().get(0).get(0).getCaption());
     }
 
     /**
