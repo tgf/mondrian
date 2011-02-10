@@ -166,7 +166,7 @@ public class CaptionTest extends TestCase {
             + "cstr(the_year) + '-12-31'\n"
             + "          </SQL>\n"
             + "          <SQL dialect=\"mysql\">\n"
-            + "concat(`the_year`, '-12-31')\n"
+            + "concat(cast(`the_year` as char(4)), '-12-31')\n"
             + "          </SQL>\n"
             + "          <SQL dialect=\"generic\">\n"
             + "\"the_year\" || '-12-31'\n"
