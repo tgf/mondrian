@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2009-2010 Julian Hyde
+// Copyright (C) 2009-2011 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -50,7 +50,7 @@ public class PerformanceTest extends FoodMartTestCase {
             + "  NON EMPTY Hierarchize(Union({[ACC].[All]}, [ACC].[All].Children)) ON ROWS\n"
             + "from [Sales]\n"
             + "where ([Time].[1997].[Q4], [Measures].[EXP2])");
-        printDuration("testBugMondrian550 execution time: ", start);
+        printDuration("testBugMondrian550 execution", start);
         assertEquals(13, result.getAxes()[0].getPositions().size());
         assertEquals(3262, result.getAxes()[1].getPositions().size());
     }
@@ -70,7 +70,7 @@ public class PerformanceTest extends FoodMartTestCase {
             + "   * [Gender].Children ON ROWS\n"
             + "from [Sales]\n"
             + "where ([Time].[1997].[Q4], [Measures].[EXP2])");
-        printDuration("testBugMondrian550Tuple execution time: ", start);
+        printDuration("testBugMondrian550Tuple execution", start);
         assertEquals(13, result2.getAxes()[0].getPositions().size());
         assertEquals(3263, result2.getAxes()[1].getPositions().size());
     }

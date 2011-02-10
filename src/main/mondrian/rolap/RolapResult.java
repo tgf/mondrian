@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
+// Copyright (C) 2001-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -1119,15 +1119,14 @@ public class RolapResult extends ResultBase {
         Position position,
         RolapBaseCubeMeasure measure)
     {
-        for (int i = 0; i < position.size(); i++) {
-            if (!(position.get(i) instanceof VisualTotalMember)) {
+        for (Member member : position) {
+            if (!(member instanceof VisualTotalMember)) {
                 continue;
             }
             evaluator.setContext(measure);
-            VisualTotalMember member = (VisualTotalMember)position.get(i);
             exprMembers = new ArrayList<Member>();
             processMemberExpr(member);
-            ((VisualTotalMember)member).setExpression(evaluator, exprMembers);
+            ((VisualTotalMember) member).setExpression(evaluator, exprMembers);
         }
         return position;
     }
