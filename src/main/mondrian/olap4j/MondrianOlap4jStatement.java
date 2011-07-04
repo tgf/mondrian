@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2007-2010 Julian Hyde
+// Copyright (C) 2007-2011 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -17,8 +17,7 @@ import org.olap4j.mdx.*;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.sql.*;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 /**
  * Implementation of {@link org.olap4j.OlapStatement}
@@ -39,6 +38,12 @@ class MondrianOlap4jStatement implements OlapStatement {
      */
     MondrianOlap4jCellSet openCellSet;
     int timeoutSeconds;
+
+    /**
+     * Writer to which profiling should be written after this statement has
+     * completed. Null if profiling is not enabled.
+     */
+    private PrintWriter profilingWriter;
 
     MondrianOlap4jStatement(
         MondrianOlap4jConnection olap4jConnection)
@@ -73,32 +78,42 @@ class MondrianOlap4jStatement implements OlapStatement {
             throw olap4jConnection.helper.createException(
                 "mondrian gave exception while parsing query", e);
         }
-        if (!(parseTree instanceof DrillThrough)) {
+        if (parseTree instanceof DrillThrough) {
+            DrillThrough drillThrough = (DrillThrough) parseTree;
+            final Query query = drillThrough.getQuery();
+            query.setResultStyle(ResultStyle.LIST);
+            CellSet cellSet = executeOlapQueryInternal(query);
+            final List<Integer> coords = Collections.nCopies(
+                cellSet.getAxes().size(), 0);
+            final MondrianOlap4jCell cell =
+                (MondrianOlap4jCell) cellSet.getCell(coords);
+            return cell.drillThroughInternal(
+                drillThrough.getMaxRowCount(),
+                drillThrough.getFirstRowOrdinal(),
+                null,
+                true,
+                null,
+                rowCountSlot);
+        } else if (parseTree instanceof Explain) {
+            String plan = explainInternal(((Explain) parseTree).getQuery());
+            return olap4jConnection.factory.newFixedResultSet(
+                olap4jConnection,
+                Collections.singletonList("PLAN"),
+                Collections.singletonList(
+                    Collections.<Object>singletonList(plan)));
+        } else {
             throw olap4jConnection.helper.createException(
                 "Query does not have relational result. Use a DRILLTHROUGH "
                 + "query, or execute using the executeOlapQuery method.");
         }
-        DrillThrough drillThrough = (DrillThrough) parseTree;
-        final Query query = drillThrough.getQuery();
-        query.setResultStyle(ResultStyle.LIST);
-        CellSet cellSet = executeOlapQueryInternal(query);
-        final List<Integer> coords = Collections.nCopies(
-            cellSet.getAxes().size(), 0);
-        final MondrianOlap4jCell cell =
-            (MondrianOlap4jCell) cellSet.getCell(coords);
-        return cell.drillThroughInternal(
-            drillThrough.getMaxRowCount(),
-            drillThrough.getFirstRowOrdinal(),
-            null,
-            true,
-            null,
-            rowCountSlot);
     }
 
-    private void checkOpen() throws SQLException {
-        if (closed) {
-            throw olap4jConnection.helper.createException("closed");
-        }
+    private String explainInternal(QueryPart query) {
+        final StringWriter sw = new StringWriter();
+        final PrintWriter pw = new PrintWriter(sw);
+        query.explain(pw);
+        pw.flush();
+        return sw.toString();
     }
 
     public int executeUpdate(String sql) throws SQLException {
@@ -383,6 +398,26 @@ class MondrianOlap4jStatement implements OlapStatement {
         node.unparse(parseTreeWriter);
         pw.flush();
         return sw.toString();
+    }
+
+    /**
+     * Enables profiling in this statement.
+     *
+     * <p>NOTE: This method does not implement a method in the olap4j API, nor
+     * it is part of Mondrian's public API. It is subject to change/removal
+     * without notice.
+     *
+     * @param pw Print writer
+     */
+    public void setProfiling(PrintWriter pw) {
+        this.profilingWriter = pw;
+        Query.enableProfiling(
+            new Query.ProfileHandler() {
+                public void explain(String s) {
+                    MondrianOlap4jStatement.this.profilingWriter.println(s);
+                }
+            }
+        );
     }
 }
 

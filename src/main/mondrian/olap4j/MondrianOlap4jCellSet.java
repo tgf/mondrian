@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2007-2010 Julian Hyde
+// Copyright (C) 2007-2011 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -17,12 +17,11 @@ import mondrian.olap.*;
 import mondrian.olap.Axis;
 import mondrian.rolap.RolapCell;
 
+import java.io.*;
 import java.util.*;
 import java.sql.*;
 import java.sql.Date;
 import java.math.BigDecimal;
-import java.io.InputStream;
-import java.io.Reader;
 import java.net.URL;
 
 /**
@@ -250,6 +249,7 @@ abstract class MondrianOlap4jCellSet implements CellSet {
 
     public void close() throws SQLException {
         this.closed = true;
+        this.result.close();
     }
 
     public boolean wasNull() throws SQLException {

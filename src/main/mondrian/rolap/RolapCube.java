@@ -4,13 +4,12 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
+// Copyright (C) 2001-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
 // jhyde, 10 August, 2001
 */
-
 package mondrian.rolap;
 
 import mondrian.mdx.*;
@@ -838,7 +837,7 @@ public class RolapCube extends CubeBase {
 
         // Now pick through the formulas.
         Util.assertTrue(
-            queryExp.formulas.length
+            queryExp.getFormulas().length
             == xmlCalcMembers.size() + xmlNamedSets.size());
         for (int i = 0; i < xmlCalcMembers.size(); i++) {
             postCalcMember(xmlCalcMembers, i, queryExp, memberList);
@@ -903,7 +902,7 @@ public class RolapCube extends CubeBase {
     {
         MondrianDef.NamedSet xmlNamedSet = xmlNamedSets.get(i);
         Util.discard(xmlNamedSet);
-        Formula formula = queryExp.formulas[offset + i];
+        Formula formula = queryExp.getFormulas()[offset + i];
         final SetBase namedSet = (SetBase) formula.getNamedSet();
         if (xmlNamedSet.caption != null
             && xmlNamedSet.caption.length() > 0)
@@ -949,7 +948,7 @@ public class RolapCube extends CubeBase {
         List<RolapMember> memberList)
     {
         MondrianDef.CalculatedMember xmlCalcMember = xmlCalcMembers.get(i);
-        final Formula formula = queryExp.formulas[i];
+        final Formula formula = queryExp.getFormulas()[i];
 
         calculatedMemberList.add(formula);
 

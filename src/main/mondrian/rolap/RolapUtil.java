@@ -4,14 +4,14 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
+// Copyright (C) 2001-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
 // jhyde, 22 December, 2001
 */
-
 package mondrian.rolap;
+
 import mondrian.olap.*;
 import mondrian.olap.fun.FunUtil;
 import mondrian.resource.MondrianResource;
@@ -37,6 +37,9 @@ import javax.sql.DataSource;
 public class RolapUtil {
     public static final Logger MDX_LOGGER = Logger.getLogger("mondrian.mdx");
     public static final Logger SQL_LOGGER = Logger.getLogger("mondrian.sql");
+    public static final Logger PROFILE_LOGGER =
+        Logger.getLogger("mondrian.profile");
+
     static final Logger LOGGER = Logger.getLogger(RolapUtil.class);
     private static Semaphore querySemaphore;
 
@@ -430,6 +433,11 @@ public class RolapUtil {
             return ((RolapCubeMember) member).getRolapMember();
         }
         return member;
+    }
+
+    public static ExpCompiler createProfilingCompiler(ExpCompiler compiler) {
+        return new RolapProfilingEvaluator.ProfilingEvaluatorCompiler(
+            compiler);
     }
 
     /**

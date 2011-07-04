@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
+// Copyright (C) 2001-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -533,11 +533,13 @@ public class RolapConnection extends ConnectionBase {
     /**
      * Executes a Query.
      *
-     * @throws ResourceLimitExceededException if some resource limit specified in the
-     * property file was exceeded
+     * @param query Query parse tree
+     *
+     * @throws ResourceLimitExceededException if some resource limit specified
+     *     in the property file was exceeded
      * @throws QueryCanceledException if query was canceled during execution
      * @throws QueryTimeoutException if query exceeded timeout specified in
-     * the property file
+     *     the property file
      */
     public Result execute(Query query) {
         class Listener implements MemoryMonitor.Listener {
@@ -580,11 +582,12 @@ public class RolapConnection extends ConnectionBase {
 
             query.setQueryStartTime();
             Result result = new RolapResult(query, true);
-            for (int i = 0; i < query.axes.length; i++) {
-                QueryAxis axis = query.axes[i];
+            int i = 0;
+            for (QueryAxis axis : query.getAxes()) {
                 if (axis.isNonEmpty()) {
                     result = new NonEmptyResult(result, query, i);
                 }
+                ++i;
             }
             /* It will not work with HighCardinality.
             if (LOGGER.isDebugEnabled()) {

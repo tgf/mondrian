@@ -2,7 +2,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2009-2010 Julian Hyde and others
+// Copyright (C) 2009-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -201,6 +201,26 @@ public class NativizeSetFunDef extends FunDefBase {
 
         public ResultStyle getResultStyle() {
             return parent.getResultStyle();
+        }
+
+        /**
+         * {@inheritDoc}
+         *
+         * Default implementation just does 'instanceof TargetClass'. Subtypes that
+         * are wrappers should override.
+         */
+        public boolean isWrapperFor(Class<?> iface) {
+            return iface.isInstance(this);
+        }
+
+        /**
+         * {@inheritDoc}
+         *
+         * Default implementation just casts to TargetClass.
+         * Subtypes that are wrappers should override.
+         */
+        public <T> T unwrap(Class<T> iface) {
+            return iface.cast(this);
         }
     }
 

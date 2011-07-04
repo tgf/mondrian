@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2004-2002 Kana Software, Inc.
-// Copyright (C) 2004-2009 Julian Hyde and others
+// Copyright (C) 2004-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -46,14 +46,15 @@ class OrderFunDef extends FunDefBase {
         final Calc expCalc = keySpecList.get(0).getKey();
         calcList[1] = expCalc;
         if (keySpecCount == 1) {
-            if (expCalc instanceof MemberValueCalc) {
-                MemberValueCalc memberValueCalc = (MemberValueCalc) expCalc;
+            if (expCalc.isWrapperFor(MemberValueCalc.class)) {
+                final MemberValueCalc memberValueCalc =
+                    expCalc.unwrap(MemberValueCalc.class);
                 List<MemberCalc> constantList = new ArrayList<MemberCalc>();
                 List<Calc> variableList = new ArrayList<Calc>();
                 final MemberCalc[] calcs =
                     (MemberCalc[]) memberValueCalc.getCalcs();
                 for (MemberCalc memberCalc : calcs) {
-                    if (memberCalc instanceof ConstantCalc
+                    if (memberCalc.isWrapperFor(ConstantCalc.class)
                         && !listCalc.dependsOn(
                             memberCalc.getType().getHierarchy()))
                     {
@@ -222,12 +223,14 @@ class OrderFunDef extends FunDefBase {
             }
         }
 
-        public List<Object> getArguments() {
+        public void collectArguments(Map<String, Object> arguments) {
+            super.collectArguments(arguments);
+
             // only good for original Order syntax
             assert originalKeySpecCount == 1;
             Flag sortKeyDir = keySpecList.get(0).getDirection();
-            return Collections.singletonList(
-                (Object)
+            arguments.put(
+                "direction",
                 (sortKeyDir.descending
                  ? (sortKeyDir.brk ? Flag.BDESC : Flag.DESC)
                  : (sortKeyDir.brk ? Flag.BASC : Flag.ASC)));
@@ -361,12 +364,14 @@ class OrderFunDef extends FunDefBase {
             }
         }
 
-        public List<Object> getArguments() {
+        public void collectArguments(Map<String, Object> arguments) {
+            super.collectArguments(arguments);
+
             // only good for original Order syntax
             assert originalKeySpecCount == 1;
             Flag sortKeyDir = keySpecList.get(0).getDirection();
-            return Collections.singletonList(
-                (Object)
+            arguments.put(
+                "direction",
                 (sortKeyDir.descending
                  ? (sortKeyDir.brk ? Flag.BDESC : Flag.DESC)
                  : (sortKeyDir.brk ? Flag.BASC : Flag.ASC)));

@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2006-2009 Julian Hyde and others
+// Copyright (C) 2006-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -67,12 +67,13 @@ public class ValidMeasureFunDef extends FunDefBase
 
         public Object evaluate(Evaluator evaluator) {
             final List<Member> memberList;
-            if (calc instanceof MemberCalc) {
+            if (calc.isWrapperFor(MemberCalc.class)) {
                 memberList = new ArrayList<Member>(1);
-                memberList.add(((MemberCalc) calc).evaluateMember(evaluator));
+                memberList.add(
+                    calc.unwrap(MemberCalc.class).evaluateMember(evaluator));
             } else {
                 final Member[] tupleMembers =
-                    ((TupleCalc)calc).evaluateTuple(evaluator);
+                    calc.unwrap((TupleCalc.class)).evaluateTuple(evaluator);
                 memberList = Arrays.asList(tupleMembers);
             }
             RolapCube baseCube = null;

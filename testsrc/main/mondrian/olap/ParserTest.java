@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2004-2010 Julian Hyde and others
+// Copyright (C) 2004-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -604,6 +604,33 @@ public class ParserTest extends FoodMartTestCase {
             + " return  return [Xxx].[AAa], [YYY]");
     }
 
+    public void testExplain() {
+        assertParseQuery(
+            "explain plan for\n"
+            + "with member [Mesaures].[Foo] as 1 + 3\n"
+            + "select [Measures].[Unit Sales] on 0,\n"
+            + " [Product].Children on 1\n"
+            + "from [Sales]",
+            "explain plan for\n"
+            + "with member [Mesaures].[Foo] as '(1 + 3)'\n"
+            + "select [Measures].[Unit Sales] ON COLUMNS,\n"
+            + "  [Product].Children ON ROWS\n"
+            + "from [Sales]\n");
+        assertParseQuery(
+            "explain plan for\n"
+            + "drillthrough maxrows 5\n"
+            + "with member [Mesaures].[Foo] as 1 + 3\n"
+            + "select [Measures].[Unit Sales] on 0,\n"
+            + " [Product].Children on 1\n"
+            + "from [Sales]",
+            "explain plan for\n"
+            + "drillthrough maxrows 5\n"
+            + "with member [Mesaures].[Foo] as '(1 + 3)'\n"
+            + "select [Measures].[Unit Sales] ON COLUMNS,\n"
+            + "  [Product].Children ON ROWS\n"
+            + "from [Sales]\n");
+    }
+
     /**
      * Parses an MDX query and asserts that the result is as expected when
      * unparsed.
@@ -615,7 +642,9 @@ public class ParserTest extends FoodMartTestCase {
         TestParser p = new TestParser();
         final QueryPart query =
             p.parseInternal(null, mdx, false, funTable, false);
-        if (!(query instanceof DrillThrough)) {
+        if (!(query instanceof DrillThrough
+            || query instanceof Explain))
+        {
             assertNull("Test parser should return null query", query);
         }
         final String actual = p.toMdxString();
@@ -659,6 +688,7 @@ public class ParserTest extends FoodMartTestCase {
         private int maxRowCount;
         private int firstRowOrdinal;
         private List<Exp> returnList;
+        private boolean explain;
 
         public TestParser() {
             super();
@@ -707,6 +737,11 @@ public class ParserTest extends FoodMartTestCase {
             this.maxRowCount = maxRowCount;
             this.firstRowOrdinal = firstRowOrdinal;
             this.returnList = returnList;
+            return null;
+        }
+
+        public Explain makeExplain(QueryPart query) {
+            this.explain = true;
             return null;
         }
 
@@ -763,6 +798,9 @@ public class ParserTest extends FoodMartTestCase {
         }
 
         private void unparse(PrintWriter pw) {
+            if (explain) {
+                pw.println("explain plan for");
+            }
             if (drillThrough) {
                 pw.print("drillthrough");
                 if (maxRowCount > 0) {

@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2002-2002 Kana Software, Inc.
-// Copyright (C) 2002-2010 Julian Hyde and others
+// Copyright (C) 2002-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -976,14 +976,14 @@ public class TestContext {
         Query query = connection.parseQuery(queryString);
         final Exp exp;
         if (scalar) {
-            exp = query.formulas[0].getExpression();
+            exp = query.getFormulas()[0].getExpression();
         } else {
-            exp = query.axes[0].getSet();
+            exp = query.getAxes()[0].getSet();
         }
         final Calc calc = query.compileExpression(exp, scalar, null);
         final StringWriter sw = new StringWriter();
         final PrintWriter pw = new PrintWriter(sw);
-        final CalcWriter calcWriter = new CalcWriter(pw);
+        final CalcWriter calcWriter = new CalcWriter(pw, false);
         calc.accept(calcWriter);
         pw.flush();
         return sw.toString();
