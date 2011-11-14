@@ -12,7 +12,6 @@
 */
 package mondrian.rolap.agg;
 
-
 import mondrian.rolap.CellKey;
 import mondrian.rolap.SqlStatement;
 
@@ -35,11 +34,11 @@ class DenseIntSegmentDataset extends DenseNativeSegmentDataset {
     /**
      * Creates a DenseIntSegmentDataset.
      *
-     * @param segment Segment
+     * @param axes Segment axes, containing actual column values
      * @param size Number of coordinates
      */
-    DenseIntSegmentDataset(Segment segment, int size) {
-        super(segment, size);
+    DenseIntSegmentDataset(SegmentAxis[] axes, int size) {
+        super(axes, size);
         this.values = new int[size];
     }
 

@@ -33,9 +33,17 @@ public final class SegmentCacheWorker {
         Logger.getLogger(SegmentCacheWorker.class);
 
     private final SegmentCache cache;
+    private final int readTimeoutMillis =
+        MondrianProperties.instance().SegmentCacheReadTimeout.get();
+    private final int lookupTimeoutMillis =
+        MondrianProperties.instance().SegmentCacheLookupTimeout.get();
+    private final int writeTimeoutMillis =
+        MondrianProperties.instance().SegmentCacheWriteTimeout.get();
+    private final int scanTimeoutMillis =
+        MondrianProperties.instance().SegmentCacheScanTimeout.get();
 
-    public SegmentCacheWorker() {
-        cache = initCache();
+    public SegmentCacheWorker(SegmentCache cache) {
+        this.cache = cache;
 
         LOGGER.debug(
             "Segment cache initialized: "
@@ -43,12 +51,11 @@ public final class SegmentCacheWorker {
     }
 
     /**
-     * Instantiates a cache. Never returns null: either returns a not-null value
-     * or throws.
+     * Instantiates a cache. Returns null if there is no external cache defined.
      *
      * @return Cache
      */
-    private SegmentCache initCache() {
+    public static SegmentCache initCache() {
         // First try to get the segmentcache impl class from
         // mondrian properties.
         final String cacheName =
@@ -69,8 +76,7 @@ public final class SegmentCacheWorker {
             }
         }
 
-        throw MondrianResource.instance()
-            .SegmentCacheFailedToInstanciate.ex();
+        return null;
     }
 
     /**
@@ -81,7 +87,7 @@ public final class SegmentCacheWorker {
      *
      * @return Cache instance, or null on error
      */
-    private SegmentCache instantiateCache(String cacheName) {
+    private static SegmentCache instantiateCache(String cacheName) {
         try {
             LOGGER.debug("Starting cache instance: " + cacheName);
             Class<?> clazz =
@@ -118,10 +124,7 @@ public final class SegmentCacheWorker {
     public SegmentBody get(SegmentHeader header) {
         try {
             return cache.get(header)
-                .get(
-                    MondrianProperties.instance()
-                        .SegmentCacheReadTimeout.get(),
-                    TimeUnit.MILLISECONDS);
+                .get(readTimeoutMillis, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -156,10 +159,7 @@ public final class SegmentCacheWorker {
     public boolean contains(SegmentHeader header) {
         try {
             return cache.contains(header)
-                .get(
-                    MondrianProperties.instance()
-                        .SegmentCacheLookupTimeout.get(),
-                    TimeUnit.MILLISECONDS);
+                .get(lookupTimeoutMillis, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -191,10 +191,7 @@ public final class SegmentCacheWorker {
         try {
             final boolean result =
                 cache.put(header, body)
-                    .get(
-                        MondrianProperties.instance()
-                            .SegmentCacheWriteTimeout.get(),
-                        TimeUnit.MILLISECONDS);
+                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
             if (!result) {
                 LOGGER.error(
                     MondrianResource.instance()
@@ -234,10 +231,7 @@ public final class SegmentCacheWorker {
         try {
             final boolean result =
                 cache.remove(header)
-                    .get(
-                        MondrianProperties.instance()
-                            .SegmentCacheWriteTimeout.get(),
-                        TimeUnit.MILLISECONDS);
+                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
             if (!result) {
                 LOGGER.error(
                     MondrianResource.instance()
@@ -277,10 +271,7 @@ public final class SegmentCacheWorker {
         try {
             final boolean result =
                 cache.flush(region)
-                    .get(
-                        MondrianProperties.instance()
-                            .SegmentCacheWriteTimeout.get(),
-                        TimeUnit.MILLISECONDS);
+                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
             if (!result) {
                 LOGGER.error(
                     MondrianResource.instance()
@@ -321,10 +312,7 @@ public final class SegmentCacheWorker {
     public List<SegmentHeader> getSegmentHeaders() {
         try {
             return cache.getSegmentHeaders()
-                .get(
-                    MondrianProperties.instance()
-                        .SegmentCacheScanTimeout.get(),
-                    TimeUnit.MILLISECONDS);
+                .get(scanTimeoutMillis, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             LOGGER.error(
                 MondrianResource.instance()

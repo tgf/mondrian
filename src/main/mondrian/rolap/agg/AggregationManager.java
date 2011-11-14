@@ -17,11 +17,14 @@ import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.SqlStatement.Type;
 import mondrian.rolap.aggmatcher.AggStar;
+import mondrian.rolap.cache.*;
+import mondrian.spi.SegmentCache;
 import mondrian.util.Pair;
 
 import org.apache.log4j.Logger;
 
 import java.util.*;
+import java.util.concurrent.Future;
 
 /**
  * <code>RolapAggregationManager</code> manages all {@link Aggregation}s
@@ -42,7 +45,12 @@ public class AggregationManager extends RolapAggregationManager {
     public final List<SegmentCacheWorker> segmentCacheWorkers =
         new ArrayList<SegmentCacheWorker>();
 
+    public final SegmentCacheManager cacheMgr = new SegmentCacheManager();
+
     private static AggregationManager instance;
+
+    public final SegmentCacheIndex segmentIndex =
+        new SegmentCacheIndexImpl();
 
     /**
      * Returns or creates the singleton.
@@ -69,6 +77,13 @@ public class AggregationManager extends RolapAggregationManager {
                 "Property " + properties.EnableCacheHitCounters.getPath()
                 + " is obsolete; ignored.");
         }
+        segmentCacheWorkers.add(
+            new SegmentCacheWorker(
+                new MemorySegmentCache()));
+        final SegmentCache externalCache = SegmentCacheWorker.initCache();
+        if (externalCache != null) {
+            segmentCacheWorkers.add(new SegmentCacheWorker(externalCache));
+        }
     }
 
     /**
@@ -92,7 +107,7 @@ public class AggregationManager extends RolapAggregationManager {
      * @param pinnedSegments Set of pinned segments
      * @param groupingSetsCollector grouping sets collector
      */
-    public void loadAggregation(
+    public List<Future<SegmentWithData>> loadAggregation(
         int cellRequestCount,
         RolapStar.Measure[] measures,
         RolapStar.Column[] columns,
@@ -108,7 +123,7 @@ public class AggregationManager extends RolapAggregationManager {
         // try to eliminate unneccessary constraints
         // for Oracle: prevent an IN-clause with more than 1000 elements
         predicates = aggregation.optimizePredicates(columns, predicates);
-        aggregation.load(
+        return aggregation.load(
             cellRequestCount, columns, measures, predicates, pinnedSegments,
             groupingSetsCollector);
     }
@@ -118,21 +133,14 @@ public class AggregationManager extends RolapAggregationManager {
     }
 
     public Object getCellFromCache(CellRequest request, PinSet pinSet) {
+        // NOTE: This method used to check both local (thread/statment) cache
+        // and global cache (segments in JVM, shared between statements). Now it
+        // only looks in local cache. This can be done without acquiring any
+        // locks, because the local cache is thread-local. If a segment that
+        // matches this cell-request in global cache, a call to
+        // SegmentCacheManager will copy it into local cache.
         final RolapStar.Measure measure = request.getMeasure();
-        // REVIEW:
-        // Is it possible to optimize this so not every cell lookup
-        // causes an AggregationKey to be created.
-        AggregationKey aggregationKey = new AggregationKey(request);
-        final Aggregation aggregation =
-            measure.getStar().lookupAggregation(aggregationKey);
-
-        if (aggregation == null) {
-            // cell is not in any aggregation
-            return null;
-        } else {
-            return aggregation.getCellValue(
-                measure, request.getSingleValues(), pinSet);
-        }
+        return measure.getStar().getCellFromCache(request, pinSet);
     }
 
     public String getDrillThroughSql(

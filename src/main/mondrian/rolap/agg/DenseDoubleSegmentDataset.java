@@ -31,11 +31,11 @@ class DenseDoubleSegmentDataset extends DenseNativeSegmentDataset {
     /**
      * Creates a DenseSegmentDataset.
      *
-     * @param segment Segment
+     * @param axes Segment axes, containing actual column values
      * @param size Number of coordinates
      */
-    DenseDoubleSegmentDataset(Segment segment, int size) {
-        super(segment, size);
+    DenseDoubleSegmentDataset(SegmentAxis[] axes, int size) {
+        super(axes, size);
         this.values = new double[size];
     }
 

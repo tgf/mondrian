@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011 Julian Hyde and others
+// Copyright (C) 2011-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -15,6 +15,7 @@ import java.util.SortedSet;
 /**
  * Implementation of a segment body which stores the data inside
  * a dense primitive array of integers.
+ *
  * @author LBoudreau
  * @version $Id$
  */
@@ -38,13 +39,18 @@ class DenseIntSegmentBody extends AbstractSegmentBody {
         this.nullIndicators = new BitSet(nullIndicators.length());
         this.nullIndicators.or(nullIndicators);
     }
-    public SegmentDataset createSegmentDataset(Segment segment) {
+
+    public SegmentDataset createSegmentDataset(
+        Segment segment,
+        SegmentAxis[] axes)
+    {
         DenseIntSegmentDataset ds =
-            new DenseIntSegmentDataset(segment, this.size);
+            new DenseIntSegmentDataset(axes, this.size);
         System.arraycopy(data, 0, ds.values, 0, this.size);
         ds.nullIndicators.clear();
         ds.nullIndicators.or(nullIndicators);
         return ds;
     }
 }
+
 // End DenseIntSegmentBody.java

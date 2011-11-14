@@ -15,8 +15,7 @@ import mondrian.rolap.*;
 import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.server.Locus;
 import mondrian.server.monitor.SqlStatementEvent;
-import mondrian.util.CombiningGenerator;
-import mondrian.util.Pair;
+import mondrian.util.*;
 
 import org.apache.log4j.Logger;
 
@@ -24,8 +23,7 @@ import java.io.Serializable;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.*;
 
 /**
  * <p>The <code>SegmentLoader</code> queries database and loads the data into
@@ -56,6 +54,12 @@ public class SegmentLoader {
 
     private final AggregationManager aggMgr;
     private final List<SegmentCacheWorker> segmentCacheWorkers;
+
+    /**
+     * List of segments loaded.
+     */
+    final Map<Segment, Future<SegmentWithData>> loadedSegmentList =
+        new HashMap<Segment, Future<SegmentWithData>>();
 
     /**
      * Creates a SegmentLoader.
@@ -96,12 +100,10 @@ public class SegmentLoader {
      *
      * @param cellRequestCount Number of missed cells that led to this request
      * @param groupingSets   List of grouping sets whose segments are loaded
-     * @param pinnedSegments Pinned segments
      */
     public void load(
         int cellRequestCount,
         List<GroupingSet> groupingSets,
-        RolapAggregationManager.PinSet pinnedSegments,
         List<StarPredicate> compoundPredicateList)
     {
         // Simple assertion. Is this Execution instance still valid,
@@ -111,84 +113,86 @@ public class SegmentLoader {
         // First check for cached segments.
         // This method will remove all the segments it fetched from
         // the cache from the groupingSets list.
-        loadSegmentsFromCache(
-            groupingSets, compoundPredicateList, pinnedSegments);
+        if (false)
+        loadSegmentsFromCache(groupingSets, compoundPredicateList);
 
         // Now try to load the segments from a rollup
         // operation of other segments.
-        loadSegmentsFromCacheRollup(
-            groupingSets, compoundPredicateList, pinnedSegments);
+        if (false)
+        loadSegmentsFromCacheRollup(groupingSets, compoundPredicateList);
 
         // Now check if there are segments left which were not
         // loaded from the cache.
-        boolean segmentsLeft = false;
-        for (GroupingSet gs : groupingSets) {
-            if (gs.getSegments().size() > 0) {
-                segmentsLeft = true;
-                break;
-            }
+        if (!anySegmentsLeft(groupingSets)) {
+            return;
         }
 
-        if (segmentsLeft) {
-            SqlStatement stmt = null;
-            GroupingSetsList groupingSetsList =
-                new GroupingSetsList(groupingSets);
-            RolapStar.Column[] defaultColumns =
-                groupingSetsList.getDefaultColumns();
+        SqlStatement stmt = null;
+        GroupingSetsList groupingSetsList =
+            new GroupingSetsList(groupingSets);
+        RolapStar.Column[] defaultColumns =
+            groupingSetsList.getDefaultColumns();
 
-            try {
-                int arity = defaultColumns.length;
-                SortedSet<Comparable<?>>[] axisValueSets =
-                    getDistinctValueWorkspace(arity);
-                stmt = createExecuteSql(
-                    cellRequestCount,
-                    groupingSetsList,
-                    compoundPredicateList);
+        try {
+            int arity = defaultColumns.length;
+            SortedSet<Comparable<?>>[] axisValueSets =
+                getDistinctValueWorkspace(arity);
+            stmt = createExecuteSql(
+                cellRequestCount,
+                groupingSetsList,
+                compoundPredicateList);
 
-                boolean[] axisContainsNull = new boolean[arity];
+            boolean[] axisContainsNull = new boolean[arity];
 
-                RowList rows =
-                    processData(
-                        stmt,
-                        axisContainsNull,
-                        axisValueSets,
-                        groupingSetsList);
-
-                boolean sparse =
-                    setAxisDataAndDecideSparseUse(
-                        axisValueSets,
-                        axisContainsNull,
-                        groupingSetsList,
-                        rows);
-
-                final Map<BitKey, GroupingSetsList.Cohort> groupingDataSetsMap =
-                    createDataSetsForGroupingSets(
-                        groupingSetsList,
-                        sparse,
-                        rows.getTypes().subList(
-                            arity, rows.getTypes().size()));
-
-                loadDataToDataSets(
-                    groupingSetsList, rows, groupingDataSetsMap);
-
-                setDataToSegments(
-                    groupingSetsList, groupingDataSetsMap, pinnedSegments);
-
-                cacheSegmentData(
-                    groupingSets,
-                    compoundPredicateList,
+            RowList rows =
+                processData(
+                    stmt,
+                    axisContainsNull,
                     axisValueSets,
-                    axisContainsNull);
-            } catch (SQLException e) {
-                throw stmt.handle(e);
-            } finally {
-                if (stmt != null) {
-                    stmt.close();
-                }
-                // Any segments which are still loading have failed.
-                setFailOnStillLoadingSegments(groupingSetsList);
+                    groupingSetsList);
+
+            boolean sparse =
+                setAxisDataAndDecideSparseUse(
+                    axisValueSets,
+                    axisContainsNull,
+                    groupingSetsList,
+                    rows);
+
+            final Map<BitKey, GroupingSetsList.Cohort> groupingDataSetsMap =
+                createDataSetsForGroupingSets(
+                    groupingSetsList,
+                    sparse,
+                    rows.getTypes().subList(
+                        arity, rows.getTypes().size()));
+
+            loadDataToDataSets(
+                groupingSetsList, rows, groupingDataSetsMap);
+
+            setDataToSegments(groupingSetsList, groupingDataSetsMap);
+
+            cacheSegmentData(
+                groupingSets,
+                compoundPredicateList,
+                axisValueSets,
+                axisContainsNull);
+        } catch (SQLException e) {
+            throw stmt.handle(e);
+        } finally {
+            if (stmt != null) {
+                stmt.close();
+            }
+            // Any segments which are still loading have failed.
+            setFailOnStillLoadingSegments(groupingSetsList);
+        }
+    }
+
+    private boolean anySegmentsLeft(List<GroupingSet> groupingSets) {
+        for (GroupingSet groupingSet : groupingSets) {
+            if (groupingSet.getSegments().size() > 0) {
+                return true;
             }
         }
+        return false;
     }
 
     /**
@@ -197,13 +201,10 @@ public class SegmentLoader {
      * list passed as the groupingSets argument.
      *
      * @param groupingSets List of segments to lookup.
-     * @param pinnedSegments PinSet of segments to keep a hard
-     * link to in memory.
      */
     private void loadSegmentsFromCache(
         List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList,
-        RolapAggregationManager.PinSet pinnedSegments)
+        List<StarPredicate> compoundPredicateList)
     {
         for (SegmentCacheWorker segmentCacheWorker : segmentCacheWorkers) {
             final List<GroupingSet> gsToRemove =
@@ -223,17 +224,12 @@ public class SegmentLoader {
                     // Make sure to dereference as the cache might have removed
                     // the data between calls to contains() and get().
                     if (sb != null) {
-                        // Load the axis keys for this segment
-                        for (int i = 0; i < segment.axes.length; i++) {
-                            Aggregation.Axis axis = segment.axes[i];
-                            axis.loadKeys(
-                                sb.getAxisValueSets()[i],
-                                sb.getNullAxisFlags()[i]);
-                        }
-                        final SegmentDataset dataSet =
-                            sb.createSegmentDataset(segment);
-                        segment.setData(dataSet, pinnedSegments);
                         segmentsToRemove.add(segment);
+                        loadedSegmentList.put(
+                            segment,
+                            new CompletedFuture<SegmentWithData>(
+                                SegmentHeader.addData(segment, sb),
+                                null));
                     }
                 }
                 groupingSet.getSegments().removeAll(segmentsToRemove);
@@ -250,13 +246,10 @@ public class SegmentLoader {
      * on pre-existing segments.
      *
      * @param groupingSets List of segments to lookup.
-     * @param pinnedSegments PinSet of segments to keep a hard
-     * link to in memory.
      */
     private void loadSegmentsFromCacheRollup(
         List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList,
-        RolapAggregationManager.PinSet pinnedSegments)
+        List<StarPredicate> compoundPredicateList)
     {
         for (SegmentCacheWorker segmentCacheWorker : segmentCacheWorkers) {
             final List<GroupingSet> gsToRemove = new ArrayList<GroupingSet>();
@@ -265,7 +258,6 @@ public class SegmentLoader {
                 for (Segment segment : groupingSet.getSegments()) {
                     if (loadSegmentFromCacheRollup(
                             compoundPredicateList,
-                            pinnedSegments,
                             segmentCacheWorker,
                             segment))
                     {
@@ -283,14 +275,16 @@ public class SegmentLoader {
         }
     }
 
+    /**
+     * Loads segments by rolling up existing segments.
+     */
     private boolean loadSegmentFromCacheRollup(
         List<StarPredicate> compoundPredicateList,
-        RolapAggregationManager.PinSet pinnedSegments,
         SegmentCacheWorker segmentCacheWorker,
-        final Segment segRef)
+        final Segment segment)
     {
         final SegmentHeader headerRef =
-            SegmentHeader.forSegment(segRef, compoundPredicateList);
+            SegmentHeader.forSegment(segment, compoundPredicateList);
 
         // First step is to build a set of segments which have the
         // same dimensionality as the segment we're trying to load.
@@ -305,13 +299,14 @@ public class SegmentLoader {
             matchingTasks.add(
                 new Callable<Boolean>() {
                     public Boolean call() throws Exception {
-                        if (header.isSubset(segRef)) {
+                        if (header.isSubset(segment)) {
                             matchingSegments.add(header);
                         }
                         return true;
                     }
             });
         }
+        if (Util.deprecated(false, false)) // very, very poor performance
         Util.executeDistributedTasks(
             matchingTasks,
             executor,
@@ -401,20 +396,12 @@ public class SegmentLoader {
             return false;
         }
 
-        // Load the axis keys for this segment
-        for (int i = 0; i < segRef.axes.length; i++) {
-            Aggregation.Axis axis = segRef.axes[i];
-            axis.loadKeys(
-                sb.getAxisValueSets()[i],
-                sb.getNullAxisFlags()[i]);
-        }
-
-        // Create the dataset object for this segment.
-        final SegmentDataset dataSet =
-            sb.createSegmentDataset(segRef);
-
         // Set the data object.
-        segRef.setData(dataSet, pinnedSegments);
+        loadedSegmentList.put(
+            segment,
+            new CompletedFuture<SegmentWithData>(
+                SegmentHeader.addData(segment, sb),
+                null));
 
         return true;
     }
@@ -458,25 +445,50 @@ public class SegmentLoader {
         SortedSet<Comparable<?>>[] axisValueSets,
         boolean[] nullAxisFlags)
     {
-        for (SegmentCacheWorker segmentCacheWorker : segmentCacheWorkers) {
-            for (final GroupingSet groupingSet : groupingSets) {
-                for (Segment segment : groupingSet.getSegments()) {
-                    final SegmentHeader sh =
-                        SegmentHeader.forSegment(segment, compoundPredicates);
-                    final SegmentBody sb =
-                        segment.getData().createSegmentBody(
-                            axisValueSets,
-                            nullAxisFlags);
-                    segmentCacheWorker.put(sh, sb);
+        for (final GroupingSet groupingSet : groupingSets) {
+            for (Segment segment : groupingSet.getSegments()) {
+                final SegmentWithData segmentWithData;
+                try {
+                    // TODO: The exceptions here are telling us something.
+                    // This method should not be called until
+                    // load of each segment is known to have completed.
+                    // It should be in a different event handler.
+                    segmentWithData = loadedSegmentList.get(segment).get();
+                } catch (InterruptedException e) {
+                    throw Util.newError(e, "While loading segment");
+                } catch (ExecutionException e) {
+                    final Throwable cause = e.getCause();
+                    if (cause instanceof RuntimeException) {
+                        throw (RuntimeException) cause;
+                    } else if (cause instanceof Error) {
+                        throw (Error) cause;
+                    } else {
+                        throw Util.newError(cause, "While loading segment");
+                    }
                 }
+                final SegmentHeader header =
+                    SegmentHeader.forSegment(segment, compoundPredicates);
+                final SegmentBody body =
+                    segmentWithData.getData().createSegmentBody(
+                        axisValueSets,
+                        nullAxisFlags);
+                for (SegmentCacheWorker segmentCacheWorker
+                    : segmentCacheWorkers)
+                {
+                    segmentCacheWorker.put(header, body);
+                }
+                aggMgr.segmentIndex.add(header);
             }
         }
     }
 
+    /**
+     * @see Util#deprecated(Object)
+     */
     void setFailOnStillLoadingSegments(GroupingSetsList groupingSetsList) {
         for (GroupingSet groupingset : groupingSetsList.getGroupingSets()) {
             for (Segment segment : groupingset.getSegments()) {
-                segment.setFailIfStillLoading();
+                // TODO: segment.setFailIfStillLoading();
             }
         }
     }
@@ -493,7 +505,7 @@ public class SegmentLoader {
         Map<BitKey, GroupingSetsList.Cohort> groupingDataSetMap)
     {
         int arity = groupingSetsList.getDefaultColumns().length;
-        Aggregation.Axis[] axes = groupingSetsList.getDefaultAxes();
+        SegmentAxis[] axes = groupingSetsList.getDefaultAxes();
         int segmentLength = groupingSetsList.getDefaultSegments().size();
 
         final List<SqlStatement.Type> types = rows.getTypes();
@@ -528,7 +540,7 @@ public class SegmentLoader {
                     {
                         continue;
                     }
-                    Aggregation.Axis axis = axes[j];
+                    SegmentAxis axis = axes[j];
                     if (o == null) {
                         o = RolapUtil.sqlNullValue;
                     }
@@ -553,16 +565,20 @@ public class SegmentLoader {
         GroupingSetsList groupingSetsList,
         RowList rows)
     {
-        Aggregation.Axis[] axes = groupingSetsList.getDefaultAxes();
+        SegmentAxis[] axes = groupingSetsList.getDefaultAxes();
         RolapStar.Column[] allColumns = groupingSetsList.getDefaultColumns();
         // Figure out size of dense array, and allocate it, or use a sparse
         // array if appropriate.
         boolean sparse = false;
         int n = 1;
         for (int i = 0; i < axes.length; i++) {
-            Aggregation.Axis axis = axes[i];
             SortedSet<Comparable<?>> valueSet = axisValueSets[i];
-            int size = axis.loadKeys(valueSet, axisContainsNull[i]);
+            axes[i] =
+                new SegmentAxis(
+                    groupingSetsList.getDefaultPredicates()[i],
+                    valueSet,
+                    axisContainsNull[i]);
+            int size = axes[i].getKeys().length;
             setAxisDataToGroupableList(
                 groupingSetsList,
                 valueSet,
@@ -586,8 +602,7 @@ public class SegmentLoader {
 
     private void setDataToSegments(
         GroupingSetsList groupingSetsList,
-        Map<BitKey, GroupingSetsList.Cohort> datasetsMap,
-        RolapAggregationManager.PinSet pinnedSegments)
+        Map<BitKey, GroupingSetsList.Cohort> datasetsMap)
     {
         List<GroupingSet> groupingSets = groupingSetsList.getGroupingSets();
         for (int i = 0; i < groupingSets.size(); i++) {
@@ -599,7 +614,14 @@ public class SegmentLoader {
                 Segment groupedSegment = groupedSegments.get(j);
                 final SegmentDataset segmentDataset =
                     cohort.segmentDatasetList.get(j);
-                groupedSegment.setData(segmentDataset, pinnedSegments);
+                loadedSegmentList.put(
+                    groupedSegment,
+                    new CompletedFuture<SegmentWithData>(
+                        new SegmentWithData(
+                            groupedSegment,
+                            segmentDataset,
+                            cohort.axes),
+                        null));
             }
         }
     }
@@ -635,9 +657,9 @@ public class SegmentLoader {
         return datasetsMap;
     }
 
-    private int calculateMaxDataSize(Aggregation.Axis[] axes) {
+    private int calculateMaxDataSize(SegmentAxis[] axes) {
         int n = 1;
-        for (Aggregation.Axis axis : axes) {
+        for (SegmentAxis axis : axes) {
             n *= axis.getKeys().length;
         }
         return n;
@@ -646,7 +668,7 @@ public class SegmentLoader {
     private GroupingSetsList.Cohort createDataSets(
         boolean sparse,
         List<Segment> segments,
-        Aggregation.Axis[] axes,
+        SegmentAxis[] axes,
         List<SqlStatement.Type> types)
     {
         final List<SegmentDataset> datasets =
@@ -659,9 +681,9 @@ public class SegmentLoader {
         }
         for (int i = 0; i < segments.size(); i++) {
             final Segment segment = segments.get(i);
-            datasets.add(segment.createDataset(sparse, types.get(i), n));
+            datasets.add(segment.createDataset(axes, sparse, types.get(i), n));
         }
-        return new GroupingSetsList.Cohort(datasets, axes.length);
+        return new GroupingSetsList.Cohort(datasets, axes);
     }
 
     private void setAxisDataToGroupableList(
@@ -676,8 +698,11 @@ public class SegmentLoader {
             RolapStar.Column[] columns = groupingSet.getColumns();
             for (int i = 0; i < columns.length; i++) {
                 if (columns[i].equals(column)) {
-                    groupingSet.getAxes()[i].loadKeys(
-                        valueSet, axisContainsNull);
+                    groupingSet.getAxes()[i] =
+                        new SegmentAxis(
+                            groupingSet.getPredicates()[i],
+                            valueSet,
+                            axisContainsNull);
                 }
             }
         }
@@ -771,7 +796,7 @@ public class SegmentLoader {
                             axisContainsNull[axisIndex] = true;
                         }
                     } else {
-                        axisValueSets[axisIndex].add(Aggregation.Axis.wrap(o));
+                        axisValueSets[axisIndex].add(SegmentAxis.wrap(o));
                     }
                     processedRows.setObject(columnIndex, o);
                     break;

@@ -35,11 +35,11 @@ class DenseObjectSegmentDataset extends DenseSegmentDataset {
     /**
      * Creates a DenseSegmentDataset.
      *
-     * @param segment Segment
+     * @param axes Segment axes, containing actual column values
      * @param size Number of coordinates
      */
-    DenseObjectSegmentDataset(Segment segment, int size) {
-        super(segment);
+    DenseObjectSegmentDataset(SegmentAxis[] axes, int size) {
+        super(axes);
         Util.discard(size);
         this.values = new Object[size];
     }

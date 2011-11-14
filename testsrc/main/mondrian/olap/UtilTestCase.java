@@ -1083,6 +1083,42 @@ public class UtilTestCase extends TestCase {
         }
         assertEquals(1 << 20, i);
     }
+
+    /**
+     * Unit test for {@link ByteString}.
+     */
+    public void testByteString() {
+        final ByteString empty0 = new ByteString(new byte[]{});
+        final ByteString empty1 = new ByteString(new byte[]{});
+        assertTrue(empty0.equals(empty1));
+        assertEquals(empty0.hashCode(), empty1.hashCode());
+        assertEquals("", empty0.toString());
+        assertEquals(0, empty0.length());
+        assertEquals(0, empty0.compareTo(empty0));
+        assertEquals(0, empty0.compareTo(empty1));
+
+        final ByteString two =
+            new ByteString(new byte[]{ (byte) 0xDE, (byte) 0xAD});
+        assertFalse(empty0.equals(two));
+        assertFalse(two.equals(empty0));
+        assertEquals("dead", two.toString());
+        assertEquals(2, two.length());
+        assertEquals(0, two.compareTo(two));
+        assertTrue(empty0.compareTo(two) < 0);
+        assertTrue(two.compareTo(empty0) > 0);
+
+        final ByteString three =
+            new ByteString(new byte[]{ (byte) 0xDE, (byte) 0x02, (byte) 0xAD});
+        assertEquals(3, three.length());
+        assertEquals("de02ad", three.toString());
+        assertTrue(two.compareTo(three) < 0);
+        assertTrue(three.compareTo(two) > 0);
+        assertEquals(0x02, three.byteAt(1));
+
+        final HashSet<ByteString> set = new HashSet<ByteString>();
+        set.addAll(Arrays.asList(empty0, two, three, two, empty1, three));
+        assertEquals(3, set.size());
+    }
 }
 
 // End UtilTestCase.java

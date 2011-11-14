@@ -31,6 +31,7 @@ import org.eigenbase.xom.XOMUtil;
 import org.olap4j.mdx.*;
 
 import java.io.*;
+import java.lang.ref.Reference;
 import java.lang.reflect.*;
 import java.math.BigDecimal;
 import java.net.MalformedURLException;
@@ -182,19 +183,34 @@ public class Util extends XOMUtil {
 
     /**
      * Parses a string and returns a SHA-256 checksum of it.
-     * @param source The source string to parse.
+     *
+     * @param value The source string to parse.
      * @return A checksum of the source string.
      */
-    public static byte[] checksumSha256(String source) {
-        MessageDigest algorithm;
+    public static byte[] digestSha256(String value) {
+        final MessageDigest algorithm;
         try {
             algorithm = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
-        algorithm.reset();
-        algorithm.update(source.getBytes());
-        return algorithm.digest();
+        return algorithm.digest(value.getBytes());
+    }
+
+    /**
+     * Creates an MD5 hash of a String.
+     *
+     * @param value String to create one way hash upon.
+     * @return MD5 hash.
+     */
+    public static byte[] digestMd5(final String value) {
+        final MessageDigest algorithm;
+        try {
+            algorithm = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+        return algorithm.digest(value.getBytes());
     }
 
     /**
@@ -2021,6 +2037,32 @@ public class Util extends XOMUtil {
         return newError(type + " '" + identifierNode + "' not found");
     }
 
+    /**
+     * Calls {@link java.util.concurrent.Future#get()} and converts any
+     * throwable into a non-checked exception.
+     *
+     * @param future Future
+     * @param message Message to qualify wrapped exception
+     * @param <T> Result type
+     * @return Result
+     */
+    public static <T> T safeGet(Future<T> future, String message) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            throw newError(e, message);
+        } catch (ExecutionException e) {
+            final Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            } else if (cause instanceof Error) {
+                throw (Error) cause;
+            } else {
+                throw newError(cause, message);
+            }
+        }
+    }
+
     public static class ErrorCellValue {
         public String toString() {
             return "#ERR";
@@ -2817,13 +2859,39 @@ public class Util extends XOMUtil {
         final char[] buffer = new char[bufferSize];
         final StringBuilder buf = new StringBuilder(bufferSize);
 
-        int len = rdr.read(buffer);
-        while (len != -1) {
+        int len;
+        while ((len = rdr.read(buffer)) != -1) {
             buf.append(buffer, 0, len);
-            len = rdr.read(buffer);
+        }
+        return buf.toString();
+    }
+
+    /**
+     * Reads an input stream until it returns EOF and returns the contents as an
+     * array of bytes.
+     *
+     * @param in  Input stream
+     * @param bufferSize size of buffer to allocate for reading.
+     * @return content of stream as an array of bytes
+     * @throws IOException on I/O error
+     */
+    public static byte[] readFully(final InputStream in, final int bufferSize)
+        throws IOException
+    {
+        if (bufferSize <= 0) {
+            throw new IllegalArgumentException(
+                "Buffer size must be greater than 0");
         }
 
-        return buf.toString();
+        final byte[] buffer = new byte[bufferSize];
+        final ByteArrayOutputStream baos =
+            new ByteArrayOutputStream(bufferSize);
+
+        int len;
+        while ((len = in.read(buffer)) != -1) {
+            baos.write(buffer, 0, len);
+        }
+        return baos.toByteArray();
     }
 
     /**
@@ -2899,7 +2967,7 @@ public class Util extends XOMUtil {
      *
      * @param url String
      * @return Apache VFS FileContent for further processing
-     * @throws FileSystemException
+     * @throws FileSystemException on error
      */
     public static InputStream readVirtualFile(String url)
         throws FileSystemException
@@ -2971,6 +3039,25 @@ public class Util extends XOMUtil {
         }
 
         return fileContent.getInputStream();
+    }
+
+    public static String readVirtualFileAsString(
+        String catalogUrl)
+        throws IOException
+    {
+        InputStream in = readVirtualFile(catalogUrl);
+        try {
+            final byte[] bytes = Util.readFully(in, 1024);
+            final char[] chars = new char[bytes.length];
+            for (int i = 0; i < chars.length; i++) {
+                chars[i] = (char) bytes[i];
+            }
+            return new String(chars);
+        } finally {
+            if (in != null) {
+                in.close();
+            }
+        }
     }
 
     /**
@@ -3462,6 +3549,7 @@ public class Util extends XOMUtil {
         }
         return null;
     }
+
     public static abstract class AbstractFlatList<T>
         implements List<T>, RandomAccess
     {
@@ -3742,6 +3830,68 @@ public class Util extends XOMUtil {
 
         public Object[] toArray() {
             return new Object[] {t0, t1, t2};
+        }
+    }
+
+    /**
+     * Garbage-collecting iterator. Iterates over a collection of references,
+     * and if any of the references has been garbage-collected, removes it from
+     * the collection.
+     *
+     * @param <T> Element type
+     */
+    public static class GcIterator<T> implements Iterator<T> {
+        private final Iterator<? extends Reference<T>> iterator;
+        private boolean hasNext;
+        private T next;
+
+        public GcIterator(Iterator<? extends Reference<T>> iterator) {
+            this.iterator = iterator;
+            this.hasNext = true;
+            moveToNext();
+        }
+
+        /**
+         * Creates an iterator over a collection of references.
+         *
+         * @param referenceIterable Collection of references
+         * @param <T2> element type
+         * @return iterable over collection
+         */
+        public static <T2> Iterable<T2> over(
+            final Iterable<? extends Reference<T2>> referenceIterable)
+        {
+            return new Iterable<T2>() {
+                public Iterator<T2> iterator() {
+                    return new GcIterator<T2>(referenceIterable.iterator());
+                }
+            };
+        }
+
+        private void moveToNext() {
+            while (iterator.hasNext()) {
+                final Reference<T> ref = iterator.next();
+                next = ref.get();
+                if (next != null) {
+                    return;
+                }
+                iterator.remove();
+            }
+            hasNext = false;
+        }
+
+        public boolean hasNext() {
+            return hasNext;
+        }
+
+        public T next() {
+            final T next1 = next;
+            moveToNext();
+            return next1;
+        }
+
+        public void remove() {
+            throw new UnsupportedOperationException();
         }
     }
 

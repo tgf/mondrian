@@ -20,8 +20,8 @@ import java.io.PrintWriter;
 import java.util.*;
 
 /**
- * <code>RolapAggregationManager</code> manages all {@link
- * mondrian.rolap.agg.Aggregation}s in the system. It is a singleton class.
+ * <code>RolapAggregationManager</code> manages all
+ * {@link mondrian.rolap.agg.Segment}s in the system.
  *
  * <p> The bits of the implementation which depend upon dimensional concepts
  * <code>RolapMember</code>, etc.) live in this class, and the other bits live

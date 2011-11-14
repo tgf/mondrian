@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2002-2002 Kana Software, Inc.
-// Copyright (C) 2002-2010 Julian Hyde and others
+// Copyright (C) 2002-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -98,7 +98,7 @@ public interface SegmentDataset extends Iterable<Map.Entry<CellKey, Object>> {
      * supplied by the {@link SegmentLoader}.
      * @param nullAxisFlags An array of booleans indicating which segment axis
      * has null values. This is supplied by the {@link SegmentLoader}.
-     * @see SegmentBody#createSegmentDataset(Segment)
+     * @see SegmentBody#createSegmentDataset(Segment, SegmentAxis[])
      * @return A {@link SegmentBody} object.
      */
     SegmentBody createSegmentBody(

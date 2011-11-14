@@ -15,10 +15,9 @@ package mondrian.rolap.agg;
 import mondrian.olap.*;
 import mondrian.rolap.*;
 
-import java.io.PrintWriter;
 import java.lang.ref.SoftReference;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Future;
 
 /**
  * A <code>Aggregation</code> is a pre-computed aggregation over a set of
@@ -69,33 +68,11 @@ public class Aggregation {
     private final int maxConstraints;
 
     /**
-     * List of soft references to segments.  This List implementation should be
-     * thread-safe on all mutative operations (add, set, and so on). Access to
-     * this list is not synchronized in the code.  This is the only mutable
-     * field in the class.
-     */
-    private final List<SoftReference<Segment>> segmentRefs =
-        new CopyOnWriteArrayList<SoftReference<Segment>>();
-
-    /**
      * Timestamp of when the aggregation was created. (We use
      * {@link java.util.Date} rather than {@link java.sql.Timestamp} because it
      * has less baggage.)
      */
     private final Date creationTimestamp;
-
-    /**
-     * This is set in the load method and is used during
-     * the processing of a particular aggregate load.
-     */
-    private RolapStar.Column[] columns;
-
-    /**
-     * This is set in the load method and is used during
-     * the process of loading aggregations/segments from
-     * rollup operations.
-     */
-    private Aggregation.Axis[] axes;
 
     /**
      * Creates an Aggregation.
@@ -140,7 +117,7 @@ public class Aggregation {
      * state = {CA, OR},
      * gender = unconstrained</pre></blockquote>
      */
-    public void load(
+    public List<Future<SegmentWithData>> load(
         int cellRequestCount,
         RolapStar.Column[] columns,
         RolapStar.Measure[] measures,
@@ -148,57 +125,56 @@ public class Aggregation {
         RolapAggregationManager.PinSet pinnedSegments,
         GroupingSetsCollector groupingSetsCollector)
     {
-        // all constrained columns
-        if (this.columns == null) {
-            this.columns = columns;
-        }
-
         BitKey measureBitKey = getConstrainedColumnsBitKey().emptyCopy();
         int axisCount = columns.length;
         Util.assertTrue(predicates.length == axisCount);
 
-        axes = new Aggregation.Axis[axisCount];
-        for (int i = 0; i < axisCount; i++) {
-            axes[i] = new Aggregation.Axis(predicates[i]);
-        }
         List<Segment> segments =
-            addSegmentsToAggregation(
-                measures, measureBitKey, axes, pinnedSegments);
+            createSegments(
+                columns, measures, measureBitKey, predicates, pinnedSegments);
+
         // The constrained columns are simply the level and foreign columns
         BitKey levelBitKey = getConstrainedColumnsBitKey();
         GroupingSet groupingSet =
             new GroupingSet(
-                segments, levelBitKey, measureBitKey, axes, columns);
+                segments, levelBitKey, measureBitKey, predicates, columns);
         if (groupingSetsCollector.useGroupingSets()) {
             groupingSetsCollector.add(groupingSet);
             // Segments are loaded using group by grouping sets
             // by CompositeBatch.loadAggregation
+            return Collections.emptyList();
         } else {
-            final List<GroupingSet> gsList =
-                new ArrayList<GroupingSet>();
-            gsList.add(groupingSet);
-            new SegmentLoader(aggMgr).load(
+            final SegmentLoader segmentLoader = new SegmentLoader(aggMgr);
+            segmentLoader.load(
                 cellRequestCount,
-                gsList,
-                pinnedSegments,
+                new ArrayList<GroupingSet>(
+                    Collections.singletonList(groupingSet)),
                 compoundPredicateList);
+            return new ArrayList<Future<SegmentWithData>>(
+                segmentLoader.loadedSegmentList.values());
         }
     }
 
-    private List<Segment> addSegmentsToAggregation(
+    private List<Segment> createSegments(
+        RolapStar.Column[] columns,
         RolapStar.Measure[] measures,
         BitKey measureBitKey,
-        Axis[] axes,
+        StarColumnPredicate[] predicates,
         RolapAggregationManager.PinSet pinnedSegments)
     {
         List<Segment> segments = new ArrayList<Segment>(measures.length);
         for (RolapStar.Measure measure : measures) {
             measureBitKey.set(measure.getBitPosition());
-            Segment segment = new Segment(
-                this, measure, axes, Collections.<Segment.Region>emptyList());
+            Segment segment =
+                new Segment(
+                    star,
+                    constrainedColumnsBitKey,
+                    columns,
+                    measure,
+                    predicates,
+                    Collections.<Segment.Region>emptyList(),
+                    compoundPredicateList);
             segments.add(segment);
-            SoftReference<Segment> ref = new SoftReference<Segment>(segment);
-            segmentRefs.add(ref);
             ((AggregationManager.PinSetImpl) pinnedSegments).add(segment);
         }
         return segments;
@@ -369,46 +345,21 @@ public class Aggregation {
         return newPredicates;
     }
 
-    public String toString() {
-        java.io.StringWriter sw = new java.io.StringWriter(256);
-        PrintWriter pw = new PrintWriter(sw);
-        print(pw);
-        pw.flush();
-        return sw.toString();
-    }
-
     /**
-     * Prints the state of this <code>Aggregation</code> to a writer.
+     * Flushes the given region from each of a list of segments.
      *
-     * @param pw Writer
+     * @param cacheControl Cache control
+     * @param cacheRegion Region to flush
+     * @param segmentRefs Input list of segments (read-only)
+     * @param newSegmentRefs List of segments after flush
+     * @param constrainedColumnsBitKey Constrained columns
      */
-    public void print(PrintWriter pw) {
-        List<Segment> segmentList = new ArrayList<Segment>();
-        for (SoftReference<Segment> ref : segmentRefs) {
-            Segment segment = ref.get();
-            if (segment == null) {
-                continue;
-            }
-            segmentList.add(segment);
-        }
-
-        // Sort segments, to make order deterministic.
-        Collections.sort(
-            segmentList,
-            new Comparator<Segment>() {
-                public int compare(Segment o1, Segment o2) {
-                    return o1.id - o2.id;
-                }
-            });
-
-        for (Segment segment : segmentList) {
-            segment.print(pw);
-        }
-    }
-
-    public void flush(
+    public static void flush(
         CacheControl cacheControl,
-        RolapCacheRegion cacheRegion)
+        RolapCacheRegion cacheRegion,
+        List<SoftReference<Segment>> segmentRefs,
+        List<SoftReference<Segment>> newSegmentRefs,
+        BitKey constrainedColumnsBitKey)
     {
         // Compare the bitmaps.
         //
@@ -438,14 +389,11 @@ public class Aggregation {
         //  - Column not in flush request, in segment. Ignore it.
         final boolean bitmapsIntersect =
             cacheRegion.getConstrainedColumnsBitKey().intersects(
-                getConstrainedColumnsBitKey());
+                constrainedColumnsBitKey);
 
-        // New list of segments - will replace segmentRefs when we're done.
-        List<SoftReference<Segment>> newSegmentRefs =
-            new ArrayList<SoftReference<Segment>>();
         segmentLoop:
         for (SoftReference<Segment> segmentRef : segmentRefs) {
-            Segment segment = segmentRef.get();
+            SegmentWithData segment = (SegmentWithData) segmentRef.get();
             if (segment == null) {
                 // Segment has been garbage collected. Flush it.
                 cacheControl.trace("discarding garbage collected segment");
@@ -463,9 +411,10 @@ public class Aggregation {
 
             // For each axis, indicates which values will be retained when
             // constraints have been applied.
+            final RolapStar.Column[] columns = segment.getColumns();
             BitSet[] axisKeepBitSets = new BitSet[columns.length];
             for (int i = 0; i < columns.length; i++) {
-                final Axis axis = segment.axes[i];
+                final SegmentAxis axis = segment.axes[i];
                 int keyCount = axis.getKeys().length;
                 final BitSet axisKeepBitSet =
                     axisKeepBitSets[i] =
@@ -559,7 +508,7 @@ public class Aggregation {
                 }
 
                 final BitSet axisBitSet = axisKeepBitSets[i];
-                final Axis axis = segment.axes[i];
+                final SegmentAxis axis = segment.axes[i];
                 final Object[] axisKeys = axis.getKeys();
 
                 if (axisBitSet.cardinality() == 0) {
@@ -583,9 +532,9 @@ public class Aggregation {
             List<StarColumnPredicate> regionPredicates =
                 new ArrayList<StarColumnPredicate>();
             int cellCount = 1;
-            for (int i = 0; i < this.columns.length; i++) {
-                RolapStar.Column column = this.columns[i];
-                Axis axis = segment.axes[i];
+            for (int i = 0; i < columns.length; i++) {
+                RolapStar.Column column = columns[i];
+                SegmentAxis axis = segment.axes[i];
                 final int pos = column.getBitPosition();
                 StarColumnPredicate flushPredicate =
                     cacheRegion.getPredicate(pos);
@@ -639,7 +588,7 @@ public class Aggregation {
                 final int bitPosition = column.getBitPosition();
                 StarColumnPredicate flushPredicate =
                     cacheRegion.getPredicate(bitPosition);
-                final Axis axis = segment.axes[bestColumn];
+                final SegmentAxis axis = segment.axes[bestColumn];
                 bestColumnPredicate = axis.predicate;
                 if (flushPredicate != null) {
                     bestColumnPredicate =
@@ -658,81 +607,6 @@ public class Aggregation {
 
             newSegmentRefs.add(new SoftReference<Segment>(newSegment));
         }
-
-        // Flush the external cache regions
-        for (SegmentCacheWorker segmentCacheWorker : aggMgr.segmentCacheWorkers)
-        {
-            segmentCacheWorker.flush(
-                SegmentHeader.forCacheRegion(cacheRegion));
-        }
-
-        // Replace list of segments.
-        // FIXME: Synchronize.
-        // TODO: Replace segmentRefs, don't copy.
-        segmentRefs.clear();
-        segmentRefs.addAll(newSegmentRefs);
-    }
-
-    /**
-     * Retrieves the value identified by <code>keys</code>.
-     * If the requested cell is found in the loading segment, current Thread
-     * will be blocked until segment is loaded.
-     *
-     * <p>If <code>pinSet</code> is not null, pins the
-     * segment which holds it. <code>pinSet</code> ensures that a segment is
-     * only pinned once.
-     *
-     * <p>Returns <code>null</code> if no segment contains the cell.
-     *
-     * <p>Returns {@link Util#nullValue} if a segment contains the cell and the
-     * cell's value is null.
-     */
-    public Object getCellValue(
-        RolapStar.Measure measure,
-        Object[] keys,
-        RolapAggregationManager.PinSet pinSet)
-    {
-        for (SoftReference<Segment> segmentref : segmentRefs) {
-            Segment segment = segmentref.get();
-            if (segment == null) {
-                segmentRefs.remove(segmentref);
-                continue; // it's being garbage-collected
-            }
-            if (segment.measure != measure) {
-                continue;
-            }
-            if (segment.isReady()) {
-                Object o = segment.getCellValue(keys);
-                if (o != null) {
-                    if (pinSet != null) {
-                        ((AggregationManager.PinSetImpl) pinSet).add(segment);
-                    }
-                    return o;
-                }
-            } else {
-                // avoid to call wouldContain - its slow
-                if (pinSet != null
-                    && !((AggregationManager.PinSetImpl) pinSet).contains(
-                        segment)
-                    && segment.wouldContain(keys))
-                {
-                    segment.waitUntilLoaded(); // waiting on Segment state
-                    if (segment.isReady()) {
-                        ((AggregationManager.PinSetImpl) pinSet).add(segment);
-                        return segment.getCellValue(keys);
-                    }
-                }
-            }
-        }
-        // No segment contains the requested cell.
-        return null;
-    }
-
-    /**
-     * This is called during Sql generation.
-     */
-    public RolapStar.Column[] getColumns() {
-        return columns;
     }
 
     /**
@@ -750,167 +624,7 @@ public class Aggregation {
         return constrainedColumnsBitKey;
     }
 
-    /**
-     * Returns an array of axis representing this aggregation.
-     * It is only available once the aggregation has been loaded.
-     *
-     * @return An array of axis objects, or null if the aggregation
-     * has not been loaded yet.
-     *
-     * @see Util#deprecated(Object) Method is not called; "axes" should become
-     * a local variable in "load", and we should remove this method
-     */
-    public Axis[] getAxes() {
-        return this.axes;
-    }
-
     // -- classes -------------------------------------------------------------
-
-    static class Axis {
-
-        /**
-         * Constraint on the keys in this Axis. Never null.
-         */
-        private final StarColumnPredicate predicate;
-
-        /**
-         * Map holding the position of each key value.
-         *
-         * <p>TODO: Hold keys in a sorted array, then deduce ordinal by doing
-         * binary search.
-         */
-        private final Map<Comparable<?>, Integer> mapKeyToOffset =
-            new HashMap<Comparable<?>, Integer>();
-
-        /**
-         * Actual key values retrieved.
-         */
-        private Comparable<?>[] keys;
-
-        private static final Integer ZERO = Integer.valueOf(0);
-        private static final Integer ONE = Integer.valueOf(1);
-
-        /**
-         * Creates an empty Axis.
-         *
-         * @param predicate Predicate defining which keys should appear on
-         *                  axis. (If a key passes the predicate but
-         *                  is not in the list, every cell with that
-         *                  key is assumed to have a null value.)
-         */
-        Axis(StarColumnPredicate predicate) {
-            this.predicate = predicate;
-            assert predicate != null;
-        }
-
-        /**
-         * Creates an axis populated with a set of keys.
-         *
-         * @param predicate Predicate defining which keys should appear on
-         *                  axis. (If a key passes the predicate but
-         *                  is not in the list, every cell with that
-         *                  key is assumed to have a null value.)
-         * @param keys      Keys
-         */
-        Axis(StarColumnPredicate predicate, Comparable[] keys) {
-            this(predicate);
-            this.keys = keys;
-            for (int i = 0; i < keys.length; i++) {
-                Comparable<?> key = keys[i];
-                mapKeyToOffset.put(key, i);
-                //noinspection unchecked
-                assert i == 0
-                       || keys[i - 1].compareTo(keys[i]) < 0;
-            }
-        }
-
-        StarColumnPredicate getPredicate() {
-            return predicate;
-        }
-
-        Comparable<?>[] getKeys() {
-            return this.keys;
-        }
-
-        /**
-         * Loads keys into the axis.
-         *
-         * @param valueSet Set of distinct key values, sorted
-         * @param hasNull  Whether the axis contains the null value, in addition
-         *                 to the values in <code>valueSet</code>
-         * @return Number of keys on axis
-         */
-        int loadKeys(SortedSet<Comparable<?>> valueSet, boolean hasNull) {
-            int size = valueSet.size();
-
-            if (hasNull) {
-                size++;
-            }
-            keys = new Comparable<?>[size];
-
-            valueSet.toArray(keys);
-            if (hasNull) {
-                keys[size - 1] = RolapUtil.sqlNullValue;
-            }
-
-            for (int i = 0; i < size; i++) {
-                mapKeyToOffset.put(keys[i], i);
-            }
-
-            return size;
-        }
-
-        static Comparable wrap(Object o) {
-            // Before JDK 1.5, Boolean did not implement Comparable
-            if (Util.PreJdk15 && o instanceof Boolean) {
-                return (Boolean) o ? ONE : ZERO;
-            } else {
-                return (Comparable) o;
-            }
-        }
-
-        final int getOffset(Object o) {
-            return getOffset(wrap(o));
-        }
-
-        final int getOffset(Comparable key) {
-            Integer ordinal = mapKeyToOffset.get(key);
-            if (ordinal == null) {
-                return -1;
-            }
-            return ordinal.intValue();
-        }
-
-        /**
-         * Returns whether this axis contains a given key, or would contain it
-         * if it existed.
-         *
-         * <p>For example, if this axis is unconstrained, then this method
-         * returns <code>true</code> for any value.
-         *
-         * @param key Key
-         * @return Whether this axis would contain <code>key</code>
-         */
-        boolean contains(Object key) {
-            return predicate.evaluate(key);
-        }
-
-        /**
-         * Returns how many of this Axis' keys match a given constraint.
-         *
-         * @param predicate Predicate
-         * @return How many keys match constraint
-         */
-        public int getMatchCount(StarColumnPredicate predicate) {
-            int matchCount = 0;
-            for (Object key : keys) {
-                if (predicate.evaluate(key)) {
-                    ++matchCount;
-                }
-            }
-            return matchCount;
-        }
-    }
 
     /**
      * Helper class to figure out which axis values evaluate to true at least
@@ -953,7 +667,7 @@ public class Aggregation {
          * For each column, the segment axis which the column corresponds to, or
          * null.
          */
-        private final Axis[] axes;
+        private final SegmentAxis[] axes;
         /**
          * For each column, a bitmap of values for which the predicate is
          * sometimes false. These values cannot be eliminated from the axis.
@@ -995,12 +709,12 @@ public class Aggregation {
          */
         ValuePruner(
             StarPredicate flushPredicate,
-            Axis[] segmentAxes,
+            SegmentAxis[] segmentAxes,
             SegmentDataset data)
         {
             this.flushPredicate = flushPredicate;
             this.arity = flushPredicate.getConstrainedColumnList().size();
-            this.axes = new Axis[arity];
+            this.axes = new SegmentAxis[arity];
             this.keepBitSets = new BitSet[arity];
             this.axisInverseOrdinals = new int[segmentAxes.length];
             Arrays.fill(axisInverseOrdinals, -1);
@@ -1033,9 +747,9 @@ public class Aggregation {
             }
         }
 
-        private int findAxis(Axis[] axes, int bitPosition) {
+        private int findAxis(SegmentAxis[] axes, int bitPosition) {
             for (int i = 0; i < axes.length; i++) {
-                Axis axis = axes[i];
+                SegmentAxis axis = axes[i];
                 if (axis.getPredicate().getConstrainedColumn().getBitPosition()
                     == bitPosition)
                 {
@@ -1097,15 +811,16 @@ public class Aggregation {
                     }
                 }
             } else {
-                final Axis axis = axes[axisOrdinal];
+                final SegmentAxis axis = axes[axisOrdinal];
                 if (axis == null) {
                     evaluatePredicate(axisOrdinal + 1);
                 } else {
+                    final Comparable<?>[] keys = axis.getKeys();
                     for (int keyOrdinal = 0;
-                        keyOrdinal < axis.keys.length;
+                        keyOrdinal < keys.length;
                         keyOrdinal++)
                     {
-                        Object key = axis.keys[keyOrdinal];
+                        Object key = keys[keyOrdinal];
                         values[axisOrdinal] = key;
                         ordinals[axisOrdinal] = keyOrdinal;
                         cellKey.setAxis(

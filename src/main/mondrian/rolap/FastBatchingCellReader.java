@@ -14,11 +14,15 @@ import mondrian.rolap.agg.*;
 import mondrian.rolap.aggmatcher.AggGen;
 import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.server.Execution;
+import mondrian.server.Locus;
 import mondrian.spi.Dialect;
+import mondrian.util.CompletedFuture;
+import mondrian.util.Pair;
 
 import org.apache.log4j.Logger;
 
 import java.util.*;
+import java.util.concurrent.Future;
 
 /**
  * A <code>FastBatchingCellReader</code> doesn't really Read cells: when asked
@@ -40,7 +44,8 @@ public class FastBatchingCellReader implements CellReader {
 
     private final RolapCube cube;
     private final Execution execution;
-    private final Map<AggregationKey, Batch> batches;
+    private final Map<AggregationKey, Batch> batches =
+        new HashMap<AggregationKey, Batch>();
 
     /**
      * Records the number of requests. The field is used for correctness: if
@@ -73,12 +78,15 @@ public class FastBatchingCellReader implements CellReader {
      */
     private boolean dirty;
 
+    private final List<Future<SegmentWithData>> futureSegments =
+        new ArrayList<Future<SegmentWithData>>();
+    private List<CellRequest> cellRequests = new ArrayList<CellRequest>();
+
     public FastBatchingCellReader(Execution execution, RolapCube cube) {
         assert cube != null;
         assert execution != null;
         this.execution = execution;
         this.cube = cube;
-        this.batches = new HashMap<AggregationKey, Batch>();
         aggMgr = execution.getMondrianStatement().getMondrianConnection()
             .getServer().getAggregationManager();
         pinnedSegments = aggMgr.createPinSet();
@@ -129,7 +137,47 @@ public class FastBatchingCellReader implements CellReader {
             return;
         }
         ++missCount;
+        cellRequests.add(request);
+    }
 
+    private void recordCellRequest2(
+        CellRequest request)
+    {
+        final Map<String, Comparable<?>> map =
+            new HashMap<String, Comparable<?>>();
+        final RolapStar.Column[] columns =
+            request.getConstrainedColumns();
+        final Object[] values = request.getSingleValues();
+        for (int i = 0; i < columns.length; i++) {
+            RolapStar.Column column = columns[i];
+            final Object o = values[i];
+            map.put(
+                column.getExpression().getGenericExpression(),
+                (Comparable<?>) o);
+        }
+
+        // If there is a segment matching these criteria, write it to the list
+        // of found segments, and remove the cell request from the list.
+        Pair<SegmentHeader, SegmentBody> headerBody =
+            locateHeaderBody(request, map);
+        if (headerBody != null) {
+            Segment segment =
+                headerBody.left.toSegment(
+                    request.getMeasure().getStar(),
+                    request.getConstrainedColumnsBitKey(),
+                    request.getConstrainedColumns(),
+                    request.getMeasure());
+            final SegmentWithData segmentWithData =
+                SegmentHeader.addData(segment, headerBody.right);
+            futureSegments.add(
+                new CompletedFuture<SegmentWithData>(
+                    segmentWithData, null));
+            return;
+        }
+
+        // TOOD: try to roll up
+
+        // Finally, add to a batch. It will turn in to a SQL request.
         final AggregationKey key = new AggregationKey(request);
         Batch batch = batches.get(key);
         if (batch == null) {
@@ -142,8 +190,6 @@ public class FastBatchingCellReader implements CellReader {
                 buf.append(request.getConstrainedColumnsBitKey());
                 buf.append(Util.nl);
 
-                final RolapStar.Column[] columns =
-                    request.getConstrainedColumns();
                 for (RolapStar.Column column : columns) {
                     buf.append("  ");
                     buf.append(column);
@@ -156,27 +202,157 @@ public class FastBatchingCellReader implements CellReader {
     }
 
     /**
+     * Locates a segment that acutally exists.
+     *
+     * @param request Cell request
+     * @param map Column values
+     * @return Segment header and body
+     */
+    private Pair<SegmentHeader, SegmentBody> locateHeaderBody(
+        CellRequest request,
+        Map<String, Comparable<?>> map)
+    {
+        final List<SegmentHeader> locate =
+            aggMgr.segmentIndex.locate(
+                request.getMeasure().getStar().getSchema().getName(),
+                request.getMeasure().getStar().getSchema().getChecksum(),
+                request.getMeasure().getCubeName(),
+                request.getMeasure().getName(),
+                request.getMeasure().getStar().getFactTable().getAlias(),
+                request.getConstrainedColumnsBitKey(),
+                map);
+        for (SegmentHeader header : locate) {
+            for (SegmentCacheWorker worker : aggMgr.segmentCacheWorkers) {
+                final SegmentBody body = worker.get(header);
+                if (body != null) {
+                    return Pair.of(header, body);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Returns whether this reader has told a lie. This is the case if there
      * are pending batches to load or if {@link #setDirty(boolean)} has been
      * called.
      */
     public boolean isDirty() {
-        return dirty || !batches.isEmpty();
+        return dirty || !cellRequests.isEmpty();
     }
 
     /**
-     * Loads pending aggregations, if any.
+     * Resolves any pending cell reads using the cache.
+     *
+     * <p>Returns a list of futures for segments that will be loaded to satisfy
+     * such cell requests. If there are no pending cell reads, returns the empty
+     * list.</p>
+     *
+     * <p>If the list is non-empty, it means that the reader has told lies.
+     * To be safe, the caller must re-evaluate expressions after loading
+     * segments.</p>
+     *
+     * <p>For each segment future, caller must retrieve the segment (say by
+     * calling {@link java.util.concurrent.Future#get()}) and place the segment
+     * into the statement-local cache.
+     *
+     * <p>The segments can come from various places:</p>
+     * <ul>
+     *     <li>Global cache (shared between all statements in this Mondrian
+     *     server that use the same star)</li>
+     *     <li>External cache</li>
+     *     <li>By rolling up a segment or segments in global cache or external
+     *     cache</li>
+     *     <li>By executing a SQL {@code GROUP BY} statement</li>
+     * </ul>
+     *
+     *
+     *
+     *
+     * Asks the cache to ensure that all cells requested in a given batch are
+     * loaded into a segment. The result may contain multiple segments, and
+     * each of the segments may or may not have completed loading.
+     *
+     * <p>The client should put the resulting segments into its "query local"
+     * cache, to ensure that future cells in that segment can be answered
+     * without a call to the cache manager. (That is probably 1000x faster.)</p>
+     *
+     * <p>The cache manager does not inform where client where each segment
+     * came from. There are several possibilities:</p>
+     *
+     * <ul>
+     *     <li>Segment was already in cache (header and body)</li>
+     *     <li>Segment is in the process of being loaded by executing a SQL
+     *     statement (probably due to a request from another client)</li>
+     *     <li>Segment is in an external cache (that is, header is in the cache,
+     *        body is not yet)</li>
+     *     <li>Segment can be created by rolling up one or more cache segments.
+     *        (And of course each of these segments might be "paged out".)</li>
+     * </ul>
+     *
+     *
+     *
+     *
+     *
+     *
      *
      * @return Whether any aggregations were loaded.
      */
     boolean loadAggregations() {
-        final long t1 = System.currentTimeMillis();
         if (!isDirty()) {
             return false;
         }
+        final Locus locus = Locus.peek();
+        List<Future<SegmentWithData>> segmentFutures =
+            aggMgr.cacheMgr.execute(
+                new SegmentCacheManager.Command<List<Future<SegmentWithData>>>()
+                {
+                    public List<Future<SegmentWithData>> call()
+                        throws Exception
+                    {
+                        Locus.push(locus);
+                        try {
+                            return runAsync();
+                        } finally {
+                            Locus.pop(locus);
+                        }
+                    }
+                }
+            );
+
+        // Wait for segments to finish loading, and place them in thread-local
+        // cache. Note that this step can't be done by the cacheMgr -- it's our
+        // cache.
+        for (Future<SegmentWithData> segmentFuture : segmentFutures) {
+            final SegmentWithData segmentWithData =
+                Util.safeGet(segmentFuture, "While loading cache segments");
+
+            segmentWithData.getStar().register(segmentWithData);
+        }
+        return true;
+    }
+
+    /**
+     *
+     * @return List of segment futures. Each segment future may or may not be
+     *    already present (it depends on the current location of the segment
+     *    body). Each future will return a not-null segment (or throw).
+     */
+    private List<Future<SegmentWithData>> runAsync() {
+        final long t1 = System.currentTimeMillis();
+
+        // Now we're inside the cache manager, we can see which of our cell
+        // requests can be answered from cache. Those that can will be added
+        // to the segments list; those that can not will be converted into
+        // batches and rolled up or loaded using SQL.
+        for (CellRequest cellRequest : cellRequests) {
+            recordCellRequest2(cellRequest);
+        }
+        cellRequests.clear();
 
         // Sort the batches into deterministic order.
-        List<Batch> batchList = new ArrayList<Batch>(batches.values());
+        List<Batch> batchList =
+            new ArrayList<Batch>(batches.values());
         Collections.sort(batchList, BatchComparator.instance);
         if (shouldUseGroupingFunction()) {
             LOGGER.debug("Using grouping sets");
@@ -191,6 +367,9 @@ public class FastBatchingCellReader implements CellReader {
             }
         }
 
+        final List<Future<SegmentWithData>> list =
+            new ArrayList<Future<SegmentWithData>>(futureSegments);
+        futureSegments.clear();
         batches.clear();
         dirty = false;
 
@@ -199,7 +378,7 @@ public class FastBatchingCellReader implements CellReader {
             LOGGER.debug("loadAggregation (millis): " + (t2 - t1));
         }
 
-        return true;
+        return list;
     }
 
     private void loadAggregation(Loadable batch) {
@@ -343,7 +522,6 @@ public class FastBatchingCellReader implements CellReader {
             getSegmentLoader().load(
                 cellRequestCount,
                 batchCollector.getGroupingSets(),
-                pinnedSegments,
                 detailedBatch.batchKey.getCompoundPredicateList());
         }
 
@@ -363,7 +541,7 @@ public class FastBatchingCellReader implements CellReader {
         void loadAggregation();
     }
 
-    class Batch implements Loadable {
+    public class Batch implements Loadable {
         // the CellRequest's constrained columns
         final RolapStar.Column[] columns;
         final List<RolapStar.Measure> measuresList =
@@ -373,6 +551,8 @@ public class FastBatchingCellReader implements CellReader {
         // string representation; for debug; set lazily in toString
         private String string;
         private int cellRequestCount;
+        private List<StarColumnPredicate[]> tuples =
+            new ArrayList<StarColumnPredicate[]>();
 
         public Batch(CellRequest request) {
             columns = request.getConstrainedColumns();
@@ -401,10 +581,15 @@ public class FastBatchingCellReader implements CellReader {
 
         public final void add(CellRequest request) {
             ++cellRequestCount;
-            final int limit = request.getNumValues();
-            for (int j = 0; j < limit; j++) {
-                valueSets[j].add(request.getValueAt(j));
+            final int valueCount = request.getNumValues();
+            final StarColumnPredicate[] tuple =
+                new StarColumnPredicate[valueCount];
+            for (int j = 0; j < valueCount; j++) {
+                final StarColumnPredicate value = request.getValueAt(j);
+                valueSets[j].add(value);
+                tuple[j] = value;
             }
+            tuples.add(tuple);
             final RolapStar.Measure measure = request.getMeasure();
             if (!measuresList.contains(measure)) {
                 assert (measuresList.size() == 0)
@@ -483,14 +668,15 @@ public class FastBatchingCellReader implements CellReader {
                     getDistinctSqlMeasures(measuresList);
                 for (RolapStar.Measure measure : distinctSqlMeasureList) {
                     RolapStar.Measure[] measures = {measure};
-                    aggMgr.loadAggregation(
-                        cellRequestCount,
-                        measures,
-                        columns,
-                        batchKey,
-                        predicates,
-                        pinnedSegments,
-                        groupingSetsCollector);
+                    futureSegments.addAll(
+                        aggMgr.loadAggregation(
+                            cellRequestCount,
+                            measures,
+                            columns,
+                            batchKey,
+                            predicates,
+                            pinnedSegments,
+                            groupingSetsCollector));
                     measuresList.remove(measure);
                 }
             }
@@ -499,6 +685,7 @@ public class FastBatchingCellReader implements CellReader {
             if (measureCount > 0) {
                 final RolapStar.Measure[] measures =
                     measuresList.toArray(new RolapStar.Measure[measureCount]);
+                futureSegments.addAll(
                     aggMgr.loadAggregation(
                         cellRequestCount,
                         measures,
@@ -506,7 +693,7 @@ public class FastBatchingCellReader implements CellReader {
                         batchKey,
                         predicates,
                         pinnedSegments,
-                        groupingSetsCollector);
+                        groupingSetsCollector));
             }
 
             if (BATCH_LOGGER.isDebugEnabled()) {
@@ -550,14 +737,15 @@ public class FastBatchingCellReader implements CellReader {
                 final RolapStar.Measure[] measures =
                     distinctMeasuresList.toArray(
                         new RolapStar.Measure[distinctMeasuresList.size()]);
-                aggmgr.loadAggregation(
-                    cellRequestCount,
-                    measures,
-                    columns,
-                    batchKey,
-                    predicates,
-                    pinnedSegments,
-                    groupingSetsCollector);
+                futureSegments.addAll(
+                    aggmgr.loadAggregation(
+                        cellRequestCount,
+                        measures,
+                        columns,
+                        batchKey,
+                        predicates,
+                        pinnedSegments,
+                        groupingSetsCollector));
             }
         }
 
@@ -596,7 +784,7 @@ public class FastBatchingCellReader implements CellReader {
                 final StringBuilder buf = new StringBuilder(64);
                 buf.append(
                     "AggGen: Sorry, can not create SQL for virtual Cube \"")
-                    .append(cube.getName())
+                    .append(cube == null ? null : cube.getName())
                     .append("\", operation not currently supported");
                 BATCH_LOGGER.error(buf.toString());
 

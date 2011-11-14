@@ -109,9 +109,6 @@ public class RolapResult extends ResultBase {
             // nothing happens.
             // Clear the local cache before a query has run
             cube.clearCachedAggregations();
-            // Check if there are modifications to the global aggregate cache
-            cube.checkAggregateModifications();
-
 
             /////////////////////////////////////////////////////////////////
             //
@@ -395,7 +392,6 @@ public class RolapResult extends ResultBase {
                     evaluator.restore(savepoint);
                     redo = false;
                     for (int i = 0; i < axes.length; i++) {
-                        RolapEvaluator e = slicerEvaluator.push();
                         QueryAxis axis = query.axes[i];
                         final Calc calc = query.axisCalcs[i];
                         TupleIterable tupleIterable =
@@ -478,10 +474,6 @@ public class RolapResult extends ResultBase {
             throw ex;
         } finally {
             if (normalExecution) {
-                // Push all modifications to the aggregate cache to the global
-                // cache so each thread can start using it
-                cube.pushAggregateModificationsToGlobalCache();
-
                 // Expression cache duration is for each query. It is time to
                 // clear out the whole expression cache at the end of a query.
                 evaluator.clearExpResultCache(true);

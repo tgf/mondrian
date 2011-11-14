@@ -3,16 +3,16 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011 Julian Hyde and others
+// Copyright (C) 2011-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
-//
 */
 package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.sql.SqlQuery;
+import mondrian.util.ByteString;
 
 import java.io.Serializable;
 import java.util.*;
@@ -50,18 +50,19 @@ public class SegmentHeader implements Serializable {
     private final int arity;
     private final ConstrainedColumn[] constrainedColumns;
     private final String[] compoundPredicates;
-    private final String measureName;
-    private final String cubeName;
-    private final String schemaName;
-    private final String rolapStarFactTableName;
-    private final BitKey constrainedColsBitKey;
+    public final String measureName;
+    public final String cubeName;
+    public final String schemaName;
+    public final String rolapStarFactTableName;
+    public final BitKey constrainedColsBitKey;
     private final int hashCode;
-    private byte[] uniqueID = null;
-    private String description = null;
-    private final String schemaChecksum;
+    private ByteString uniqueID;
+    private String description;
+    public final ByteString schemaChecksum;
 
     /**
      * Base constructor for segment headers.
+     *
      * @param schemaName The name of the schema which this
      * header belongs to.
      * @param cubeName The name of the cube this segment belongs to.
@@ -72,7 +73,7 @@ public class SegmentHeader implements Serializable {
      */
     public SegmentHeader(
         String schemaName,
-        String schemaChecksum,
+        ByteString schemaChecksum,
         String cubeName,
         String measureName,
         ConstrainedColumn[] constrainedColumns,
@@ -84,8 +85,10 @@ public class SegmentHeader implements Serializable {
             constrainedColumns, new String[0],
             rolapStarFactTableName, constrainedColsBitKey);
     }
+
     /**
      * Base constructor for segment headers.
+     *
      * @param schemaName The name of the schema which this
      * header belongs to.
      * @param cubeName The name of the cube this segment belongs to.
@@ -96,7 +99,7 @@ public class SegmentHeader implements Serializable {
      */
     public SegmentHeader(
         String schemaName,
-        String schemaChecksum,
+        ByteString schemaChecksum,
         String cubeName,
         String measureName,
         ConstrainedColumn[] constrainedColumns,
@@ -107,6 +110,7 @@ public class SegmentHeader implements Serializable {
         this.constrainedColumns = constrainedColumns;
         this.schemaName = schemaName;
         this.schemaChecksum = schemaChecksum;
+//        assert schemaChecksum != null;
         this.cubeName = cubeName;
         this.measureName = measureName;
         this.compoundPredicates = compoundPredicates;
@@ -123,14 +127,38 @@ public class SegmentHeader implements Serializable {
         hash = Util.hash(hash, measureName);
         for (ConstrainedColumn col : this.constrainedColumns) {
             hash = Util.hash(hash, col.columnExpression);
-            for (Object val : col.values) {
-                hash = Util.hash(hash, val);
-            }
+            hash = Util.hashArray(hash, col.values);
         }
         for (String col : this.compoundPredicates) {
             hash = Util.hash(hash, col);
         }
         this.hashCode = hash;
+    }
+
+    /**
+     * Converts a segment plus a {@link mondrian.rolap.agg.SegmentBody} into a
+     * {@link mondrian.rolap.agg.SegmentWithData}.
+     *
+     * @param segment Segment
+     * @param sb Segment body
+     * @return SegmentWithData
+     */
+    public static SegmentWithData addData(Segment segment, SegmentBody sb) {
+        // Load the axis keys for this segment
+        SegmentAxis[] axes =
+            new SegmentAxis[segment.predicates.length];
+        for (int i = 0; i < segment.predicates.length; i++) {
+            StarColumnPredicate predicate =
+                segment.predicates[i];
+            axes[i] =
+                new SegmentAxis(
+                    predicate,
+                    sb.getAxisValueSets()[i],
+                    sb.getNullAxisFlags()[i]);
+        }
+        final SegmentDataset dataSet =
+            sb.createSegmentDataset(segment, axes);
+        return new SegmentWithData(segment, dataSet, axes);
     }
 
     public int hashCode() {
@@ -168,6 +196,7 @@ public class SegmentHeader implements Serializable {
     /**
      * Creates a SegmentHeader object describing the supplied
      * Segment object.
+     *
      * @param segment A segment object for which we want to generate
      * a SegmentHeader.
      * @return A SegmentHeader describing the supplied Segment object.
@@ -176,39 +205,121 @@ public class SegmentHeader implements Serializable {
         Segment segment,
         List<StarPredicate> compoundPredicates)
     {
-        final ConstrainedColumn[] cc =
-            new ConstrainedColumn[segment.axes.length];
-        final String cp[] = new String[compoundPredicates.size()];
-        for (int i = 0; i < segment.axes.length; i++) {
-            Aggregation.Axis axis = segment.axes[i];
-            // First get the values
-            final List<Object> values = new ArrayList<Object>();
-            axis.getPredicate().values(values);
-            // Now build the CC object
-            cc[i] =
-                new SegmentHeader.ConstrainedColumn(
-                    axis.getPredicate().getConstrainedColumn()
-                        .getExpression().getGenericExpression(),
-                    values.toArray());
+        Util.deprecated(
+            "remove compoundPredicates parameter - duplicates segment field",
+            false);
+        final List<ConstrainedColumn> cc =
+            new ArrayList<ConstrainedColumn>();
+        final List<String> cp = new ArrayList<String>();
+        for (StarColumnPredicate predicate : segment.predicates) {
+            cc.add(toConstrainedColumn(predicate));
         }
-        for (int i = 0; i < compoundPredicates.size(); i++) {
-            StringBuilder buf = new StringBuilder();
+        StringBuilder buf = new StringBuilder();
+        for (StarPredicate compoundPredicate : compoundPredicates) {
+            buf.setLength(0);
             SqlQuery query =
                 new SqlQuery(
-                    segment.aggregation.getStar().getSqlQueryDialect());
-            compoundPredicates.get(i).toSql(query, buf);
-            cp[i] = buf.toString();
+                    segment.getStar().getSqlQueryDialect());
+            compoundPredicate.toSql(query, buf);
+            cp.add(buf.toString());
         }
-        return
-            new SegmentHeader(
-                segment.measure.getStar().getSchema().getName(),
-                segment.measure.getStar().getSchema().getChecksum(),
-                segment.measure.getCubeName(),
-                segment.measure.getName(),
-                cc,
-                cp,
-                segment.aggregation.getStar().getFactTable().getAlias(),
-                segment.aggregation.getConstrainedColumnsBitKey());
+        final RolapStar.Measure measure = segment.measure;
+        final RolapStar star = measure.getStar();
+        final RolapSchema schema = star.getSchema();
+        return new SegmentHeader(
+            schema.getName(),
+            schema.getChecksum(),
+            measure.getCubeName(),
+            measure.getName(),
+            cc.toArray(new ConstrainedColumn[cc.size()]),
+            cp.toArray(new String[cp.size()]),
+            star.getFactTable().getAlias(),
+            segment.getConstrainedColumnsBitKey());
+    }
+
+    private static ConstrainedColumn toConstrainedColumn(
+        StarColumnPredicate predicate)
+    {
+        if (predicate instanceof LiteralStarPredicate
+            && predicate.evaluate(Collections.emptyList()))
+        {
+            // Column is not constrained, i.e. wildcard.
+            return new ConstrainedColumn(
+                predicate.getConstrainedColumn()
+                    .getExpression().getGenericExpression(),
+                null);
+        }
+
+        final List<Object> values = new ArrayList<Object>();
+        predicate.values(values);
+        return new ConstrainedColumn(
+            predicate.getConstrainedColumn()
+                .getExpression().getGenericExpression(),
+            values.toArray());
+    }
+
+    /**
+     * Creates a segment from this SegmentHeader. The star,
+     * constrainedColsBitKey, constrainedColumns and measure arguments are a
+     * helping hand, because we know what we were looking for.
+     *
+     * @param star Star
+     * @param constrainedColumnsBitKey Constrained columns
+     * @param constrainedColumns Constrained columns
+     * @param measure Measure
+     * @return Segment
+     */
+    public Segment toSegment(
+        RolapStar star,
+        BitKey constrainedColumnsBitKey,
+        RolapStar.Column[] constrainedColumns,
+        RolapStar.Measure measure)
+    {
+        // TODO: read excludedRegions, compoundPredicateList
+        // from the SegmentHeader
+        final List<StarColumnPredicate> predicateList =
+            new ArrayList<StarColumnPredicate>();
+        for (int i = 0; i < constrainedColumns.length; i++) {
+            RolapStar.Column constrainedColumn = constrainedColumns[i];
+            final Object[] values = this.constrainedColumns[i].values;
+            StarColumnPredicate predicate;
+            if (values == null) {
+                predicate =
+                    new LiteralStarPredicate(
+                        constrainedColumn,
+                        true);
+            } else if (values.length == 1) {
+                predicate =
+                    new ValueColumnPredicate(
+                        constrainedColumn,
+                        values[0]);
+            } else {
+                final List<StarColumnPredicate> valuePredicateList =
+                    new ArrayList<StarColumnPredicate>();
+                for (Object value : values) {
+                    valuePredicateList.add(
+                        new ValueColumnPredicate(
+                            constrainedColumn,
+                            value));
+                }
+                predicate =
+                    new ListColumnPredicate(
+                        constrainedColumn,
+                        valuePredicateList);
+            }
+            predicateList.add(predicate);
+        }
+        List<Segment.Region> excludedRegions = Collections.emptyList();
+        List<StarPredicate> compoundPredicateList = Collections.emptyList();
+        return new Segment(
+            star,
+            constrainedColumnsBitKey,
+            constrainedColumns,
+            measure,
+            predicateList.toArray(
+                new StarColumnPredicate[predicateList.size()]),
+            excludedRegions,
+            compoundPredicateList);
     }
 
     /**
@@ -255,26 +366,24 @@ public class SegmentHeader implements Serializable {
         private int hashCode = Integer.MIN_VALUE;
 
         /**
-         * Constructor for ConstrainedColumn.
+         * Creates a ConstrainedColumn.
+         *
          * @param columnExpression Name of the source table into which the
          * constrained column is, as defined in the Mondrian schema.
+         *
          * @param valueList List of values to constrain the
-         * column to. Use objects like Integer, Boolean, String
-         * or Double.
+         *     column to, or null if unconstrained. Values must be
+         *     {@link Comparable} and immutable. For example, Integer, Boolean,
+         *     String or Double.
          */
         public ConstrainedColumn(
             String columnExpression,
             Object[] valueList)
         {
             this.columnExpression = columnExpression;
-            this.values = new Object[valueList.length];
-            System.arraycopy(
-                valueList,
-                0,
-                this.values,
-                0,
-                valueList.length);
+            this.values = valueList == null ? null : valueList.clone();
         }
+
         /**
          * Returns the column expression of this constrained column.
          * @return A column expression.
@@ -282,6 +391,7 @@ public class SegmentHeader implements Serializable {
         public String getColumnExpression() {
             return columnExpression;
         }
+
         /**
          * Returns an array of predicate values for this column.
          * @return An array of object values.
@@ -296,18 +406,8 @@ public class SegmentHeader implements Serializable {
                 return false;
             }
             ConstrainedColumn that = (ConstrainedColumn) obj;
-            if (!this.columnExpression.equals(that.columnExpression)) {
-                return false;
-            }
-            if (this.values.length != that.values.length) {
-                return false;
-            }
-            for (int i = 0; i < this.values.length; i++) {
-                if (!this.values[i].equals(that.values[i])) {
-                    return false;
-                }
-            }
-            return true;
+            return this.columnExpression.equals(that.columnExpression)
+                && Arrays.equals(this.values, that.values);
         }
 
         @Override
@@ -382,12 +482,10 @@ public class SegmentHeader implements Serializable {
      * @return True or false.
      */
     public boolean isSubset(Segment segment) {
-        if (!segment.aggregation.getStar().getSchema().getName()
-                .equals(schemaName))
-        {
+        if (!segment.getStar().getSchema().getName().equals(schemaName)) {
             return false;
         }
-        if (!segment.aggregation.getStar().getFactTable().getAlias()
+        if (!segment.getStar().getFactTable().getAlias()
                 .equals(rolapStarFactTableName))
         {
             return false;
@@ -398,7 +496,7 @@ public class SegmentHeader implements Serializable {
         if (!segment.measure.getCubeName().equals(cubeName)) {
             return false;
         }
-        if (segment.aggregation.getConstrainedColumnsBitKey()
+        if (segment.getConstrainedColumnsBitKey()
                 .equals(constrainedColsBitKey))
         {
             return true;
@@ -414,7 +512,7 @@ public class SegmentHeader implements Serializable {
      * and predicate values.
      * @return A unique identification string.
      */
-    public String getUniqueID() {
+    public ByteString getUniqueID() {
         if (this.uniqueID == null) {
             StringBuilder hashSB = new StringBuilder();
             hashSB.append(this.schemaName);
@@ -423,21 +521,19 @@ public class SegmentHeader implements Serializable {
             hashSB.append(this.measureName);
             for (ConstrainedColumn c : constrainedColumns) {
                 hashSB.append(c.columnExpression);
-                for (Object value : c.values) {
-                    hashSB.append(String.valueOf(value));
+                if (c.values != null) {
+                    for (Object value : c.values) {
+                        hashSB.append(String.valueOf(value));
+                    }
                 }
             }
             for (String c : compoundPredicates) {
                 hashSB.append(c);
             }
-            this.uniqueID = Util.checksumSha256(hashSB.toString());
+            this.uniqueID =
+                new ByteString(Util.digestSha256(hashSB.toString()));
         }
-        final StringBuffer hexString = new StringBuffer();
-        for (int i = 0; i < this.uniqueID.length; i++) {
-          hexString.append(
-              Integer.toHexString(0xFF & this.uniqueID[i]));
-        }
-        return hexString.toString();
+        return uniqueID;
     }
 
     /**

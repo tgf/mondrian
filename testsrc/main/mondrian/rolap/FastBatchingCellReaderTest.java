@@ -1169,7 +1169,8 @@ public class FastBatchingCellReaderTest extends BatchTestCase {
                 SegmentLoader getSegmentLoader() {
                     return new SegmentLoader(fbcr.aggMgr) {
                         public void load(
-                            int cellRequestCount, List<GroupingSet> sets,
+                            int cellRequestCount,
+                            List<GroupingSet> sets,
                             RolapAggregationManager.PinSet pinnedSegments,
                             List<StarPredicate> compoundPredicateList)
                         {

@@ -3,10 +3,9 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011 Julian Hyde and others
+// Copyright (C) 2011-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
-//
 */
 package mondrian.rolap.agg;
 
@@ -27,11 +26,12 @@ public interface SegmentBody extends Serializable {
     /**
      * Returns a SegmentDataset object which contains the cached
      * data and is initialized to be used with the supplied segment.
-     * @param segment Segment to which the returned dataset will be
-     * associated to.
-     * @return A SegmentDataset object which contains cached data.
+     *
+     * @param segment Segment with which the returned dataset will be associated
+     * @param axes Segment axes, containing actual column values
+     * @return A SegmentDataset object that contains cached data.
      */
-    SegmentDataset createSegmentDataset(Segment segment);
+    SegmentDataset createSegmentDataset(Segment segment, SegmentAxis[] axes);
 
     /**
      * Returns the cached axis value sets to be used as an
@@ -47,4 +47,5 @@ public interface SegmentBody extends Serializable {
      */
     boolean[] getNullAxisFlags();
 }
+
 // End SegmentBody.java

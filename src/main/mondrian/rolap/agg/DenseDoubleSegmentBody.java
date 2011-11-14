@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011 Julian Hyde and others
+// Copyright (C) 2011-2011 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -38,9 +38,12 @@ class DenseDoubleSegmentBody extends AbstractSegmentBody {
         this.nullIndicators.or(nullIndicators);
     }
 
-    public SegmentDataset createSegmentDataset(Segment segment) {
+    public SegmentDataset createSegmentDataset(
+        Segment segment,
+        SegmentAxis[] axes)
+    {
         DenseDoubleSegmentDataset ds =
-            new DenseDoubleSegmentDataset(segment, this.size);
+            new DenseDoubleSegmentDataset(axes, this.size);
         System.arraycopy(data, 0, ds.values, 0, this.size);
         ds.nullIndicators.clear();
         ds.nullIndicators.or(nullIndicators);

@@ -36,8 +36,7 @@ import java.util.*;
 class SparseSegmentDataset implements SegmentDataset {
     final Map<CellKey, Object> values = new HashMap<CellKey, Object>();
 
-    SparseSegmentDataset(Segment segment) {
-        Util.discard(segment);
+    SparseSegmentDataset() {
     }
 
     public Object getObject(CellKey pos) {
