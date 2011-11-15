@@ -30,12 +30,11 @@ public class SegmentAxis {
 
     /**
      * Map holding the position of each key value.
-     *
+     * <p/>
      * <p>TODO: Hold keys in a sorted array, then deduce ordinal by doing
      * binary search.
      */
-    private final Map<Comparable<?>, Integer> mapKeyToOffset =
-        new HashMap<Comparable<?>, Integer>();
+    private final Map<Comparable<?>, Integer> mapKeyToOffset;
 
     /**
      * Actual key values retrieved.
@@ -44,6 +43,8 @@ public class SegmentAxis {
 
     private static final Integer ZERO = Integer.valueOf(0);
     private static final Integer ONE = Integer.valueOf(1);
+    private static final Comparable<?>[] NO_COMPARABLES =
+        new Comparable<?>[0];
 
     /**
      * Internal constructor.
@@ -54,9 +55,18 @@ public class SegmentAxis {
         boolean safe)
     {
         this.predicate = predicate;
-        this.keys = keys;
-        for (int i = 0; i < keys.length; i++) {
-            mapKeyToOffset.put(keys[i], i);
+        if (keys.length == 0) {
+            // Optimize the case where axis is empty. Not that infrequent:
+            // it records that mondrian has looked in the database and found
+            // nothing.
+            this.keys = NO_COMPARABLES;
+            this.mapKeyToOffset = Collections.emptyMap();
+        } else {
+            this.keys = keys;
+            mapKeyToOffset = new HashMap<Comparable<?>, Integer>(keys.length);
+            for (int i = 0; i < keys.length; i++) {
+                mapKeyToOffset.put(keys[i], i);
+            }
         }
         assert predicate != null;
         assert safe || Util.isSorted(Arrays.asList(keys));

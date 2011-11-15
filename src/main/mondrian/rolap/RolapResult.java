@@ -19,6 +19,7 @@ import mondrian.olap.fun.VisualTotalsFunDef.VisualTotalMember;
 import mondrian.olap.type.ScalarType;
 import mondrian.resource.MondrianResource;
 import mondrian.rolap.agg.AggregationManager;
+import mondrian.rolap.agg.CellRequestQuantumExceededException;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
 import mondrian.spi.CellFormatter;
@@ -583,13 +584,17 @@ public class RolapResult extends ResultBase {
         evaluator.setCellReader(batchingReader);
         while (true) {
             axisMembers.clearAxisCount();
-            evalLoad(
-                nonAllMembers,
-                nonAllMembers.size() - 1,
-                evaluator,
-                axis,
-                calc,
-                axisMembers);
+            try {
+                evalLoad(
+                    nonAllMembers,
+                    nonAllMembers.size() - 1,
+                    evaluator,
+                    axis,
+                    calc,
+                    axisMembers);
+            } catch (CellRequestQuantumExceededException e) {
+                // Safe to ignore. Need to call 'phase' and loop again.
+            }
 
             if (!phase()) {
                 break;
@@ -809,7 +814,11 @@ public class RolapResult extends ResultBase {
         while (true) {
             evaluator.setCellReader(batchingReader);
             final int savepoint = evaluator.savepoint();
-            executeStripe(query.axes.length - 1, evaluator, pos);
+            try {
+                executeStripe(query.axes.length - 1, evaluator, pos);
+            } catch (CellRequestQuantumExceededException e) {
+                // ignore
+            }
             evaluator.restore(savepoint);
 
             // Retrieve the aggregations collected.
@@ -1953,6 +1962,7 @@ public class RolapResult extends ResultBase {
 
         return list;
     }
+
 }
 
 // End RolapResult.java

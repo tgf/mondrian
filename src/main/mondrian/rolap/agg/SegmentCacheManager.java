@@ -69,10 +69,6 @@ import java.util.concurrent.*;
  * client). AggregationManager (or maybe MondrianServer) is another constructor
  * parameter.</p>
  *
- *
- *
- * <h2>Done but not checked in</h2>
- *
  * <p>6. Move functionality Aggregation to Segment. Long-term, Aggregation
  * should not be used as a 'gatekeeper' to Segment. Remove Aggregation fields
  * columns and axes.</p>
@@ -91,8 +87,13 @@ import java.util.concurrent.*;
  * RolapSchema.pushAggregateModificationsToGlobalCache,
  * RolapCube.pushAggregateModificationsToGlobalCache.</p>
  *
- *
  * <p>13. Add new implementations of Future: CompletedFuture and SlotFuture.</p>
+ *
+ *
+ *
+ * <h2>Done but not checked in</h2>
+ *
+ * -
  *
  *
  *
@@ -198,6 +199,16 @@ import java.util.concurrent.*;
  * <p>16. Is {@link SegmentLoader#loadSegmentsFromCache} still doing something
  * useful? We should have checked the cache before we created batches + grouping
  * sets.</p>
+ *
+ * <p>17. Revisit the strategy for finding segments that can be copied from
+ * global and external cache into local cache. The strategy of sending N
+ * {@link CellRequest}s at a time, then executing SQL to fill in the gaps, is
+ * flawed. We need to maximize N in order to reduce segment fragmentation, but
+ * if too high, we blow memory. BasicQueryTest.testAnalysis is an example of
+ * this. Instead, we should send cell-requests in batches (is ~1000 the right
+ * size?), identify those that can be answered from global or external cache,
+ * return those segments, but not execute SQL until the end of the phase.
+ * If so, {@link CellRequestQuantumExceededException} be obsoleted.</p>
  *
  *
  * <h2>Segment lifecycle</h2>
