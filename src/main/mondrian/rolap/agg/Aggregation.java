@@ -342,6 +342,13 @@ public class Aggregation {
                 newPredicates[j] = new LiteralStarPredicate(columns[j], true);
             }
         }
+
+        // Now do simple structural optimizations, e.g. convert a list predicate
+        // with one element to a value predicate.
+        for (int i = 0; i < newPredicates.length; i++) {
+            newPredicates[i] = StarPredicates.optimize(newPredicates[i]);
+        }
+
         return newPredicates;
     }
 
