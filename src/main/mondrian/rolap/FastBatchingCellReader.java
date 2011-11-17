@@ -16,8 +16,7 @@ import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
 import mondrian.spi.Dialect;
-import mondrian.util.CompletedFuture;
-import mondrian.util.Pair;
+import mondrian.util.*;
 
 import org.apache.log4j.Logger;
 
@@ -80,7 +79,10 @@ public class FastBatchingCellReader implements CellReader {
 
     private final List<Future<SegmentWithData>> futureSegments =
         new ArrayList<Future<SegmentWithData>>();
-    private List<CellRequest> cellRequests = new ArrayList<CellRequest>();
+    private final List<CellRequest> cellRequests = new ArrayList<CellRequest>();
+
+    private final Set<SegmentHeader> segmentHeaderResults =
+        Util.newIdentityHashSet();
 
     public FastBatchingCellReader(Execution execution, RolapCube cube) {
         assert cube != null;
@@ -166,17 +168,24 @@ public class FastBatchingCellReader implements CellReader {
         Pair<SegmentHeader, SegmentBody> headerBody =
             locateHeaderBody(request, map);
         if (headerBody != null) {
-            Segment segment =
-                headerBody.left.toSegment(
-                    request.getMeasure().getStar(),
-                    request.getConstrainedColumnsBitKey(),
-                    request.getConstrainedColumns(),
-                    request.getMeasure());
-            final SegmentWithData segmentWithData =
-                SegmentHeader.addData(segment, headerBody.right);
-            futureSegments.add(
-                new CompletedFuture<SegmentWithData>(
-                    segmentWithData, null));
+            // A previous cell request in this request might have hit the same
+            // segment. Only create a segment the first time we see this segment
+            // header.
+            final SegmentHeader header = headerBody.left;
+            if (segmentHeaderResults.add(header)) {
+                Segment segment =
+                    header.toSegment(
+                        request.getMeasure().getStar(),
+                        request.getConstrainedColumnsBitKey(),
+                        request.getConstrainedColumns(),
+                        request.getMeasure());
+                final SegmentBody body = headerBody.right;
+                final SegmentWithData segmentWithData =
+                    SegmentHeader.addData(segment, body);
+                futureSegments.add(
+                    new CompletedFuture<SegmentWithData>(
+                        segmentWithData, null));
+            }
             return;
         }
 
@@ -375,6 +384,7 @@ public class FastBatchingCellReader implements CellReader {
         final List<Future<SegmentWithData>> list =
             new ArrayList<Future<SegmentWithData>>(futureSegments);
         futureSegments.clear();
+        segmentHeaderResults.clear();
         batches.clear();
         dirty = false;
 

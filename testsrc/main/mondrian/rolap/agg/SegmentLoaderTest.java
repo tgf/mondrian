@@ -104,23 +104,26 @@ public class SegmentLoaderTest extends BatchTestCase {
                     getData(true));
             }
         };
-        loader.load(0, groupingSets, null);
+        final List<Future<SegmentWithData>> loadedSegmentList =
+            loader.load(0, groupingSets, null);
         SegmentAxis[] axes = groupingSetsInfo.getAxes();
         verifyYearAxis(axes[0]);
         verifyProductFamilyAxis(axes[1]);
         verifyProductDepartmentAxis(axes[2]);
         verifyGenderAxis(axes[3]);
         verifyUnitSalesDetailed(
-            loader.loadedSegmentList.get(
-                groupingSets.get(0).getSegments().get(0)).get());
+            getFor(
+                loadedSegmentList,
+                groupingSets.get(0).getSegments().get(0)));
 
         axes = groupingSets.get(0).getAxes();
         verifyYearAxis(axes[0]);
         verifyProductFamilyAxis(axes[1]);
         verifyProductDepartmentAxis(axes[2]);
         verifyUnitSalesAggregate(
-            loader.loadedSegmentList.get(
-                groupingSets.get(1).getSegments().get(0)).get());
+            getFor(
+                loadedSegmentList,
+                groupingSets.get(1).getSegments().get(0)));
     }
 
     private ResultSet toResultSet(final List<Object[]> list) {
@@ -177,10 +180,12 @@ public class SegmentLoaderTest extends BatchTestCase {
                     getDataWithNullInRollupColumn(true));
             }
         };
-        loader.load(0, groupingSets, null);
+        List<Future<SegmentWithData>> loadedSegmentList =
+            loader.load(0, groupingSets, null);
         SegmentWithData detailedSegment =
-            loader.loadedSegmentList.get(
-                groupingSets.get(0).getSegments().get(0)).get();
+            getFor(
+                loadedSegmentList,
+                groupingSets.get(0).getSegments().get(0));
         assertEquals(3, detailedSegment.getCellCount());
     }
 
@@ -211,23 +216,40 @@ public class SegmentLoaderTest extends BatchTestCase {
                 return true;
             }
         };
-        loader.load(0, groupingSets, null);
+        List<Future<SegmentWithData>> loadedSegmentList =
+            loader.load(0, groupingSets, null);
         SegmentAxis[] axes = groupingSetsInfo.getAxes();
         verifyYearAxis(axes[0]);
         verifyProductFamilyAxis(axes[1]);
         verifyProductDepartmentAxis(axes[2]);
         verifyGenderAxis(axes[3]);
         verifyUnitSalesDetailedForSparse(
-            loader.loadedSegmentList.get(
-                groupingSets.get(0).getSegments().get(0)).get());
+            getFor(
+                loadedSegmentList,
+                groupingSets.get(0).getSegments().get(0)));
 
         axes = groupingSets.get(0).getAxes();
         verifyYearAxis(axes[0]);
         verifyProductFamilyAxis(axes[1]);
         verifyProductDepartmentAxis(axes[2]);
         verifyUnitSalesAggregateForSparse(
-            loader.loadedSegmentList.get(
-                groupingSets.get(1).getSegments().get(0)).get());
+            getFor(
+                loadedSegmentList,
+                groupingSets.get(1).getSegments().get(0)));
+    }
+
+    private SegmentWithData getFor(
+        List<Future<SegmentWithData>> loadedSegmentList,
+        Segment segment)
+        throws ExecutionException, InterruptedException
+    {
+        for (Future<SegmentWithData> future : loadedSegmentList) {
+            final SegmentWithData segmentWithData = future.get();
+            if (segmentWithData.equals(segment)) {
+                return segmentWithData;
+            }
+        }
+        return null;
     }
 
     private List<Object[]> trim(final int length, final List<Object[]> data) {
@@ -263,15 +285,17 @@ public class SegmentLoaderTest extends BatchTestCase {
                     trim(5, getData(false)));
             }
         };
-        loader.load(0, groupingSets, null);
+        List<Future<SegmentWithData>> loadedSegmentList =
+            loader.load(0, groupingSets, null);
         SegmentAxis[] axes = groupingSetsInfo.getAxes();
         verifyYearAxis(axes[0]);
         verifyProductFamilyAxis(axes[1]);
         verifyProductDepartmentAxis(axes[2]);
         verifyGenderAxis(axes[3]);
         verifyUnitSalesDetailed(
-            loader.loadedSegmentList.get(
-                groupingSetsInfo.getSegments().get(0)).get());
+            getFor(
+                loadedSegmentList,
+                groupingSetsInfo.getSegments().get(0)));
     }
 
     public void

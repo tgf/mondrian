@@ -21,7 +21,7 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Pattern;
 
 // Only in Java5 and above
@@ -38,9 +38,10 @@ import java.util.regex.Pattern;
  * @version $Id$
  * @since Feb 5, 2007
  */
-public class UtilCompatibleJdk15 implements UtilCompatible {
+public abstract class UtilCompatibleJdk15 implements UtilCompatible {
     private final static Logger LOGGER =
         Logger.getLogger(Util.class);
+
     /**
      * This generates a BigDecimal with a precision reflecting
      * the precision of the input double.
@@ -123,6 +124,10 @@ public class UtilCompatibleJdk15 implements UtilCompatible {
                     e);
             }
         }
+    }
+
+    public <T> Set<T> newIdentityHashSet() {
+        return Util.newIdentityHashSetFake();
     }
 }
 

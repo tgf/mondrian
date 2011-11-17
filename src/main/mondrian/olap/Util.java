@@ -2063,6 +2063,63 @@ public class Util extends XOMUtil {
         }
     }
 
+    public static <T> Set<T> newIdentityHashSetFake() {
+        final HashMap<T, Boolean> map = new HashMap<T, Boolean>();
+        return new Set<T>() {
+            public int size() {
+                return map.size();
+            }
+
+            public boolean isEmpty() {
+                return map.isEmpty();
+            }
+
+            public boolean contains(Object o) {
+                return map.containsKey(o);
+            }
+
+            public Iterator<T> iterator() {
+                return map.keySet().iterator();
+            }
+
+            public Object[] toArray() {
+                return map.keySet().toArray();
+            }
+
+            public <T> T[] toArray(T[] a) {
+                return map.keySet().toArray(a);
+            }
+
+            public boolean add(T t) {
+                return map.put(t, Boolean.TRUE) == null;
+            }
+
+            public boolean remove(Object o) {
+                return map.remove(o) == Boolean.TRUE;
+            }
+
+            public boolean containsAll(Collection<?> c) {
+                return map.keySet().containsAll(c);
+            }
+
+            public boolean addAll(Collection<? extends T> c) {
+                throw new UnsupportedOperationException();
+            }
+
+            public boolean retainAll(Collection<?> c) {
+                throw new UnsupportedOperationException();
+            }
+
+            public boolean removeAll(Collection<?> c) {
+                throw new UnsupportedOperationException();
+            }
+
+            public void clear() {
+                map.clear();
+            }
+        };
+    }
+
     public static class ErrorCellValue {
         public String toString() {
             return "#ERR";
@@ -3339,6 +3396,17 @@ public class Util extends XOMUtil {
      */
     public static <T> void threadLocalRemove(ThreadLocal<T> threadLocal) {
         compatible.threadLocalRemove(threadLocal);
+    }
+
+    /**
+     * Creates a hash set that, like {@link java.util.IdentityHashMap},
+     * compares keys using identity.
+     *
+     * @param <T> Element type
+     * @return Set
+     */
+    public static <T> Set<T> newIdentityHashSet() {
+        return compatible.newIdentityHashSet();
     }
 
     /**

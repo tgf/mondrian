@@ -89,7 +89,6 @@ public class Segment {
      * An array of axes, one for each constraining column, containing the values
      * returned for that constraining column.
      */
-    //final SegmentAxis[] axes;
     final StarColumnPredicate[] predicates;
 
     protected final RolapStar star;

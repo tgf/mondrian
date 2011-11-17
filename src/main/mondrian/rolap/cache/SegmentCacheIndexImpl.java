@@ -80,6 +80,10 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         BitKey constrainedColsBitKey,
         Map<String, Comparable<?>> coords)
     {
+        // most selective condition first
+        if (!header.constrainedColsBitKey.equals(constrainedColsBitKey)) {
+            return false;
+        }
         if (!header.schemaName.equals(schemaName)) {
             return false;
         }
@@ -91,9 +95,6 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             return false;
         }
         if (!header.measureName.equals(measureName)) {
-            return false;
-        }
-        if (!header.constrainedColsBitKey.equals(constrainedColsBitKey)) {
             return false;
         }
         if (!header.rolapStarFactTableName.equals(rolapStarFactTableName)) {

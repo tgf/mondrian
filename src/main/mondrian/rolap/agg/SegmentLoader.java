@@ -58,8 +58,9 @@ public class SegmentLoader {
     /**
      * List of segments loaded.
      */
-    final Map<Segment, Future<SegmentWithData>> loadedSegmentList =
-        new HashMap<Segment, Future<SegmentWithData>>();
+    private final Map<Segment, Pair<SegmentWithData, Throwable>>
+        loadedSegmentList =
+        new HashMap<Segment, Pair<SegmentWithData, Throwable>>();
 
     /**
      * Creates a SegmentLoader.
@@ -101,7 +102,7 @@ public class SegmentLoader {
      * @param cellRequestCount Number of missed cells that led to this request
      * @param groupingSets   List of grouping sets whose segments are loaded
      */
-    public void load(
+    public List<Future<SegmentWithData>> load(
         int cellRequestCount,
         List<GroupingSet> groupingSets,
         List<StarPredicate> compoundPredicateList)
@@ -124,7 +125,7 @@ public class SegmentLoader {
         // Now check if there are segments left which were not
         // loaded from the cache.
         if (!anySegmentsLeft(groupingSets)) {
-            return;
+            return Collections.emptyList();
         }
 
         SqlStatement stmt = null;
@@ -133,6 +134,7 @@ public class SegmentLoader {
         RolapStar.Column[] defaultColumns =
             groupingSetsList.getDefaultColumns();
 
+        Throwable throwable = null;
         try {
             int arity = defaultColumns.length;
             SortedSet<Comparable<?>>[] axisValueSets =
@@ -175,14 +177,34 @@ public class SegmentLoader {
                 compoundPredicateList,
                 axisValueSets,
                 axisContainsNull);
-        } catch (SQLException e) {
+
+            final ArrayList<Future<SegmentWithData>> list =
+                new ArrayList<Future<SegmentWithData>>();
+            for (Pair<SegmentWithData, Throwable> pair
+                : loadedSegmentList.values())
+            {
+                list.add(
+                    new CompletedFuture<SegmentWithData>(
+                        pair.left,
+                        pair.right == null
+                            ? null
+                            : new ExecutionException(pair.right)));
+            }
+            return list;
+        } catch (Error e) {
+            throwable = e;
+            throw e;
+        } catch (Throwable e) {
+            throwable = e;
             throw stmt.handle(e);
         } finally {
             if (stmt != null) {
                 stmt.close();
             }
-            // Any segments which are still loading have failed.
-            setFailOnStillLoadingSegments(groupingSetsList);
+            if (throwable != null) {
+                // Any segments which are still loading have failed.
+                setFailOnStillLoadingSegments(groupingSetsList, throwable);
+            }
         }
     }
 
@@ -227,9 +249,9 @@ public class SegmentLoader {
                         segmentsToRemove.add(segment);
                         loadedSegmentList.put(
                             segment,
-                            new CompletedFuture<SegmentWithData>(
+                            Pair.of(
                                 SegmentHeader.addData(segment, sb),
-                                null));
+                                (Throwable) null));
                     }
                 }
                 groupingSet.getSegments().removeAll(segmentsToRemove);
@@ -399,9 +421,9 @@ public class SegmentLoader {
         // Set the data object.
         loadedSegmentList.put(
             segment,
-            new CompletedFuture<SegmentWithData>(
+            Pair.of(
                 SegmentHeader.addData(segment, sb),
-                null));
+                (Throwable) null));
 
         return true;
     }
@@ -448,24 +470,24 @@ public class SegmentLoader {
         for (final GroupingSet groupingSet : groupingSets) {
             for (Segment segment : groupingSet.getSegments()) {
                 final SegmentWithData segmentWithData;
-                try {
+//                try {
                     // TODO: The exceptions here are telling us something.
                     // This method should not be called until
                     // load of each segment is known to have completed.
                     // It should be in a different event handler.
-                    segmentWithData = loadedSegmentList.get(segment).get();
-                } catch (InterruptedException e) {
-                    throw Util.newError(e, "While loading segment");
-                } catch (ExecutionException e) {
-                    final Throwable cause = e.getCause();
-                    if (cause instanceof RuntimeException) {
-                        throw (RuntimeException) cause;
-                    } else if (cause instanceof Error) {
-                        throw (Error) cause;
-                    } else {
-                        throw Util.newError(cause, "While loading segment");
-                    }
-                }
+                    segmentWithData = loadedSegmentList.get(segment).left;
+//                } catch (InterruptedException e) {
+//                    throw Util.newError(e, "While loading segment");
+//                } catch (ExecutionException e) {
+//                    final Throwable cause = e.getCause();
+//                    if (cause instanceof RuntimeException) {
+//                        throw (RuntimeException) cause;
+//                    } else if (cause instanceof Error) {
+//                        throw (Error) cause;
+//                    } else {
+//                        throw Util.newError(cause, "While loading segment");
+//                    }
+//                }
                 final SegmentHeader header =
                     SegmentHeader.forSegment(segment, compoundPredicates);
                 final SegmentBody body =
@@ -482,13 +504,17 @@ public class SegmentLoader {
         }
     }
 
-    /**
-     * @see Util#deprecated(Object)
-     */
-    void setFailOnStillLoadingSegments(GroupingSetsList groupingSetsList) {
+    private void setFailOnStillLoadingSegments(
+        GroupingSetsList groupingSetsList,
+        Throwable e)
+    {
         for (GroupingSet groupingset : groupingSetsList.getGroupingSets()) {
             for (Segment segment : groupingset.getSegments()) {
-                // TODO: segment.setFailIfStillLoading();
+                if (!loadedSegmentList.containsKey(segment)) {
+                    loadedSegmentList.put(
+                        segment,
+                        Pair.of((SegmentWithData) null, e));
+                }
             }
         }
     }
@@ -616,12 +642,12 @@ public class SegmentLoader {
                     cohort.segmentDatasetList.get(j);
                 loadedSegmentList.put(
                     groupedSegment,
-                    new CompletedFuture<SegmentWithData>(
+                    Pair.of(
                         new SegmentWithData(
                             groupedSegment,
                             segmentDataset,
                             cohort.axes),
-                        null));
+                        (Throwable) null));
             }
         }
     }

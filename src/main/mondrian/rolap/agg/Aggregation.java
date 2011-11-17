@@ -145,13 +145,11 @@ public class Aggregation {
             return Collections.emptyList();
         } else {
             final SegmentLoader segmentLoader = new SegmentLoader(aggMgr);
-            segmentLoader.load(
+            return segmentLoader.load(
                 cellRequestCount,
                 new ArrayList<GroupingSet>(
                     Collections.singletonList(groupingSet)),
                 compoundPredicateList);
-            return new ArrayList<Future<SegmentWithData>>(
-                segmentLoader.loadedSegmentList.values());
         }
     }
 

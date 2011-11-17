@@ -14,6 +14,7 @@ import mondrian.olap.Util;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.Statement;
+import java.util.Set;
 
 /**
  * Interface containing methods which are implemented differently in different
@@ -64,7 +65,25 @@ public interface UtilCompatible {
         String script,
         String engineName);
 
+    /**
+     * Removes a thread local from the current thread.
+     *
+     * <p>From JDK 1.5 onwards, calls {@link ThreadLocal#remove()}; before
+     * that, no-ops.</p>
+     *
+     * @param threadLocal Thread local
+     * @param <T> Type
+     */
     <T> void threadLocalRemove(ThreadLocal<T> threadLocal);
+
+    /**
+     * Creates a hash set that, like {@link java.util.IdentityHashMap},
+     * compares keys using identity.
+     *
+     * @param <T> Element type
+     * @return Set
+     */
+    <T> Set<T> newIdentityHashSet();
 }
 
 // End UtilCompatible.java

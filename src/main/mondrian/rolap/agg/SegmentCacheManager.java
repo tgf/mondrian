@@ -500,8 +500,9 @@ public class SegmentCacheManager {
         private final BlockingQueue<Pair<Handler, Message>> eventQueue =
             new ArrayBlockingQueue<Pair<Handler, Message>>(1000);
 
-        private final ResponseQueue<Command, Object> responseQueue =
-            new ResponseQueue<Command, Object>(1000);
+        private final ResponseQueue<Command, Pair<Object, Throwable>>
+            responseQueue =
+            new ResponseQueue<Command, Pair<Object, Throwable>>(1000);
 
         public void run() {
             try {
@@ -515,16 +516,16 @@ public class SegmentCacheManager {
                         // the caller.
                         if (message instanceof Command) {
                             Command command = (Command) message;
-                            Object result;
                             try {
-                                result = command.call();
+                                Object result = command.call();
+                                responseQueue.put(
+                                    command,
+                                    Pair.of(result, (Throwable) null));
                             } catch (Throwable e) {
-                                // REVIEW: Somewhere better to send it?
-                                e.printStackTrace();
-
-                                result = null;
+                                responseQueue.put(
+                                    command,
+                                    Pair.of(null, e));
                             }
-                            responseQueue.put(command, result);
                         } else {
                             Event event = (Event) message;
                             event.acceptWithoutResponse(handler);
@@ -563,7 +564,19 @@ public class SegmentCacheManager {
                 throw Util.newError(e, "Exception while executing " + command);
             }
             try {
-                return (T) responseQueue.take(command);
+                final Pair<Object, Throwable> pair =
+                    responseQueue.take(command);
+                if (pair.right != null) {
+                    if (pair.right instanceof RuntimeException) {
+                        throw (RuntimeException) pair.right;
+                    } else if (pair.right instanceof Error) {
+                        throw (Error) pair.right;
+                    } else {
+                        throw new RuntimeException(pair.right);
+                    }
+                } else {
+                    return (T) pair.left;
+                }
             } catch (InterruptedException e) {
                 throw Util.newError(e, "Exception while executing " + command);
             }

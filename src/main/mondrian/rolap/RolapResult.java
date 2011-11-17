@@ -388,49 +388,54 @@ public class RolapResult extends ResultBase {
             //
             final int savepoint = evaluator.savepoint();
             do {
-                boolean redo;
-                do {
-                    evaluator.restore(savepoint);
-                    redo = false;
-                    for (int i = 0; i < axes.length; i++) {
-                        QueryAxis axis = query.axes[i];
-                        final Calc calc = query.axisCalcs[i];
-                        TupleIterable tupleIterable =
-                            evalExecute(
-                                nonAllMembers,
-                                nonAllMembers.size() - 1,
-                                evaluator,
-                                axis,
-                                calc);
+                try {
+                    boolean redo;
+                    do {
+                        evaluator.restore(savepoint);
+                        redo = false;
+                        for (int i = 0; i < axes.length; i++) {
+                            QueryAxis axis = query.axes[i];
+                            final Calc calc = query.axisCalcs[i];
+                            TupleIterable tupleIterable =
+                                evalExecute(
+                                    nonAllMembers,
+                                    nonAllMembers.size() - 1,
+                                    evaluator,
+                                    axis,
+                                    calc);
 
-                        if (!nonAllMembers.isEmpty()) {
-                            final TupleIterator tupleIterator =
-                                tupleIterable.tupleIterator();
-                            if (tupleIterator.hasNext()) {
-                                List<Member> tuple0 = tupleIterator.next();
-                                // Only need to process the first tuple on the
-                                // axis.
-                                for (Member m : tuple0) {
-                                    if (m.isCalculated()) {
-                                        CalculatedMeasureVisitor visitor =
-                                            new CalculatedMeasureVisitor();
-                                        m.getExpression().accept(visitor);
-                                        Dimension dimension = visitor.dimension;
-                                        if (removeDimension(
-                                                dimension, nonAllMembers))
-                                        {
-                                            redo = true;
+                            if (!nonAllMembers.isEmpty()) {
+                                final TupleIterator tupleIterator =
+                                    tupleIterable.tupleIterator();
+                                if (tupleIterator.hasNext()) {
+                                    List<Member> tuple0 = tupleIterator.next();
+                                    // Only need to process the first tuple on
+                                    // the axis.
+                                    for (Member m : tuple0) {
+                                        if (m.isCalculated()) {
+                                            CalculatedMeasureVisitor visitor =
+                                                new CalculatedMeasureVisitor();
+                                            m.getExpression().accept(visitor);
+                                            Dimension dimension =
+                                                visitor.dimension;
+                                            if (removeDimension(
+                                                    dimension, nonAllMembers))
+                                            {
+                                                redo = true;
+                                            }
                                         }
                                     }
                                 }
                             }
+                            this.axes[i] =
+                                new RolapAxis(
+                                    TupleCollections.materialize(
+                                        tupleIterable, false));
                         }
-                        this.axes[i] =
-                            new RolapAxis(
-                                TupleCollections.materialize(
-                                    tupleIterable, false));
-                    }
-                } while (redo);
+                    } while (redo);
+                } catch (CellRequestQuantumExceededException e) {
+                    // Safe to ignore. Need to call 'phase' and loop again.
+                }
             } while (phase());
 
             evaluator.restore(savepoint);
@@ -594,6 +599,9 @@ public class RolapResult extends ResultBase {
                     axisMembers);
             } catch (CellRequestQuantumExceededException e) {
                 // Safe to ignore. Need to call 'phase' and loop again.
+                // Decrement count because it wasn't a recursive formula that
+                // caused the iteration.
+                --attempt;
             }
 
             if (!phase()) {
@@ -817,7 +825,10 @@ public class RolapResult extends ResultBase {
             try {
                 executeStripe(query.axes.length - 1, evaluator, pos);
             } catch (CellRequestQuantumExceededException e) {
-                // ignore
+                // Safe to ignore. Need to call 'phase' and loop again.
+                // Decrement count because it wasn't a recursive formula that
+                // caused the iteration.
+                --count;
             }
             evaluator.restore(savepoint);
 

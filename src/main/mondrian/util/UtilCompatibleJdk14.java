@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * Implementation of {@link UtilCompatible} which runs in
@@ -132,6 +133,10 @@ public class UtilCompatibleJdk14 implements UtilCompatible {
                     e);
             }
         }
+    }
+
+    public <T> Set<T> newIdentityHashSet() {
+        return Util.newIdentityHashSetFake();
     }
 }
 
