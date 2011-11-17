@@ -156,7 +156,7 @@ public class SegmentWithData extends Segment {
             Object key = keys[i];
             int offset = axes[i].getOffset(key);
             if (offset < 0) {
-                if (axes[i].getPredicate().evaluate(key)) {
+                if (axes[i].wouldContain(key)) {
                     // see whether this segment should contain this value
                     missed++;
                     continue;
@@ -194,7 +194,7 @@ public class SegmentWithData extends Segment {
         Util.assertTrue(keys.length == axes.length);
         for (int i = 0; i < keys.length; i++) {
             Object key = keys[i];
-            if (!axes[i].getPredicate().evaluate(key)) {
+            if (!axes[i].wouldContain(key)) {
                 return false;
             }
         }

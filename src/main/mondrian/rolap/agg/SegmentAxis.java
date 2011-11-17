@@ -29,6 +29,13 @@ public class SegmentAxis {
     final StarColumnPredicate predicate;
 
     /**
+     * Whether predicate is always true.
+     */
+    private final boolean predicateAlwaysTrue;
+
+    private final Set<Object> predicateValues;
+
+    /**
      * Map holding the position of each key value.
      * <p/>
      * <p>TODO: Hold keys in a sorted array, then deduce ordinal by doing
@@ -55,6 +62,10 @@ public class SegmentAxis {
         boolean safe)
     {
         this.predicate = predicate;
+        this.predicateAlwaysTrue =
+            predicate instanceof LiteralStarPredicate
+            && ((LiteralStarPredicate) predicate).getValue();
+        this.predicateValues = predicateValueSet(predicate);
         if (keys.length == 0) {
             // Optimize the case where axis is empty. Not that infrequent:
             // it records that mondrian has looked in the database and found
@@ -70,6 +81,32 @@ public class SegmentAxis {
         }
         assert predicate != null;
         assert safe || Util.isSorted(Arrays.asList(keys));
+    }
+
+    private static Set<Object> predicateValueSet(
+        StarColumnPredicate predicate)
+    {
+        if (!(predicate instanceof ListColumnPredicate)) {
+            return null;
+        }
+        ListColumnPredicate listColumnPredicate =
+            (ListColumnPredicate) predicate;
+        final List<StarColumnPredicate> predicates =
+            listColumnPredicate.getPredicates();
+        if (predicates.size() < 10) {
+            return null;
+        }
+        final HashSet<Object> set = new HashSet<Object>();
+        for (StarColumnPredicate subPredicate : predicates) {
+            if (subPredicate instanceof ValueColumnPredicate) {
+                ValueColumnPredicate valueColumnPredicate =
+                    (ValueColumnPredicate) subPredicate;
+                valueColumnPredicate.values(set);
+            } else {
+                return null;
+            }
+        }
+        return set;
     }
 
     /**
@@ -159,8 +196,11 @@ public class SegmentAxis {
      * @param key Key
      * @return Whether this axis would contain <code>key</code>
      */
-    boolean contains(Object key) {
-        return predicate.evaluate(key);
+    public final boolean wouldContain(Object key) {
+        return predicateAlwaysTrue
+            || (predicateValues != null
+                ? predicateValues.contains(key)
+                : predicate.evaluate(key));
     }
 
     /**
