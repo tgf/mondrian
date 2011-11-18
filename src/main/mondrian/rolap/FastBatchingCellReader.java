@@ -216,7 +216,7 @@ public class FastBatchingCellReader implements CellReader {
     }
 
     /**
-     * Locates a segment that acutally exists.
+     * Locates a segment that actually exists.
      *
      * @param request Cell request
      * @param map Column values
@@ -227,7 +227,7 @@ public class FastBatchingCellReader implements CellReader {
         Map<String, Comparable<?>> map)
     {
         final List<SegmentHeader> locate =
-            aggMgr.segmentIndex.locate(
+            aggMgr.cacheMgr.segmentIndex.locate(
                 request.getMeasure().getStar().getSchema().getName(),
                 request.getMeasure().getStar().getSchema().getChecksum(),
                 request.getMeasure().getCubeName(),

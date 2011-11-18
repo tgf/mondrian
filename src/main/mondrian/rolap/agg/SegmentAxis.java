@@ -12,6 +12,8 @@ package mondrian.rolap.agg;
 import mondrian.olap.Util;
 import mondrian.rolap.RolapUtil;
 import mondrian.rolap.StarColumnPredicate;
+import mondrian.util.ArraySortedSet;
+import mondrian.util.Pair;
 
 import java.util.*;
 
@@ -165,20 +167,10 @@ public class SegmentAxis {
         return keys;
     }
 
-    static Comparable wrap(Object o) {
-        // Before JDK 1.5, Boolean did not implement Comparable
-        if (Util.PreJdk15 && o instanceof Boolean) {
-            return (Boolean) o ? ONE : ZERO;
-        } else {
-            return (Comparable) o;
-        }
-    }
-
-    final int getOffset(Object o) {
-        return getOffset(wrap(o));
-    }
-
     final int getOffset(Comparable key) {
+        if (keys.length == 1) {
+            return keys[0].equals(key) ? 0 : -1;
+        }
         Integer ordinal = mapKeyToOffset.get(key);
         if (ordinal == null) {
             return -1;
@@ -217,6 +209,21 @@ public class SegmentAxis {
             }
         }
         return matchCount;
+    }
+
+    @SuppressWarnings({"unchecked"})
+    public Pair<SortedSet<Comparable<?>>, Boolean> getValuesAndIndicator() {
+        if (keys.length > 0
+            && keys[keys.length - 1] == RolapUtil.sqlNullValue)
+        {
+            return (Pair) Pair.of(
+                new ArraySortedSet(keys, 0, keys.length - 1),
+                Boolean.TRUE);
+        } else {
+            return (Pair) Pair.of(
+                new ArraySortedSet(keys),
+                Boolean.FALSE);
+        }
     }
 }
 

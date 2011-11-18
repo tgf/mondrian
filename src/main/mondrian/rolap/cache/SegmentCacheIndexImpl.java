@@ -27,11 +27,15 @@ import java.util.*;
 public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     private final List<SegmentHeader> headerList =
         new ArrayList<SegmentHeader>();
+    private final Thread thread;
 
     /**
      * Creates a SegmentCacheIndexImpl.
+     *
+     * @param thread Thread that must be used to execute commands.
      */
-    public SegmentCacheIndexImpl() {
+    public SegmentCacheIndexImpl(Thread thread) {
+        this.thread = thread;
     }
 
     public List<SegmentHeader> locate(
@@ -43,6 +47,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         BitKey constrainedColsBitKey,
         Map<String, Comparable<?>> coords)
     {
+        assert thread == Thread.currentThread()
+            : "expected " + thread + ", but was " + Thread.currentThread();
         List<SegmentHeader> list = Collections.emptyList();
         for (SegmentHeader header : headerList) {
             if (matches(
@@ -67,6 +73,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     }
 
     public void add(SegmentHeader header) {
+        assert thread == Thread.currentThread()
+            : "expected " + thread + ", but was " + Thread.currentThread();
         headerList.add(header);
     }
 

@@ -12,10 +12,11 @@
 */
 package mondrian.rolap.agg;
 
-import mondrian.olap.Util;
 import mondrian.rolap.CellKey;
 import mondrian.rolap.SqlStatement;
+import mondrian.util.Pair;
 
+import java.util.List;
 import java.util.SortedSet;
 
 /**
@@ -39,9 +40,18 @@ class DenseObjectSegmentDataset extends DenseSegmentDataset {
      * @param size Number of coordinates
      */
     DenseObjectSegmentDataset(SegmentAxis[] axes, int size) {
+        this(axes, new Object[size]);
+    }
+
+    /**
+     * Creates and populates a DenseSegmentDataset. The data set is not copied.
+     *
+     * @param axes Axes
+     * @param values Data set
+     */
+    DenseObjectSegmentDataset(SegmentAxis[] axes, Object[] values) {
         super(axes);
-        Util.discard(size);
-        this.values = new Object[size];
+        this.values = values;
     }
 
     public Object getObject(CellKey key) {
@@ -86,15 +96,11 @@ class DenseObjectSegmentDataset extends DenseSegmentDataset {
     }
 
     public SegmentBody createSegmentBody(
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
-        return
-            new DenseObjectSegmentBody(
-                values,
-                getSize(),
-                axisValueSets,
-                nullAxisFlags);
+        return new DenseObjectSegmentBody(
+            values,
+            axes);
     }
 }
 

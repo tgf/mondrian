@@ -9,29 +9,38 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.util.Pair;
+
+import java.util.List;
 import java.util.SortedSet;
 
 /**
  * Implementation of a segment body which stores the data inside
  * a dense array of Java objects.
+ *
  * @author LBoudreau
  * @version $Id$
  */
 class DenseObjectSegmentBody extends AbstractSegmentBody {
     private static final long serialVersionUID = -3558427982849392173L;
-    final Object[] data;
-    private final int size;
 
+    private final Object[] values;
+
+    /**
+     * Creates a DenseObjectSegmentBody.
+     *
+     * <p>Stores the given array of cell values; caller must not modify it
+     * afterwards.</p>
+     *
+     * @param values Cell values
+     * @param axes Axes
+     */
     DenseObjectSegmentBody(
-        Object[] dataToSave,
-        int size,
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        Object[] values,
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
-        super(axisValueSets, nullAxisFlags);
-        this.size = size;
-        this.data = new Object[size];
-        System.arraycopy(dataToSave, 0, data, 0, size);
+        super(axes);
+        this.values = values;
     }
 
     public SegmentDataset createSegmentDataset(
@@ -39,8 +48,8 @@ class DenseObjectSegmentBody extends AbstractSegmentBody {
         SegmentAxis[] axes)
     {
         DenseObjectSegmentDataset ds =
-            new DenseObjectSegmentDataset(axes, this.size);
-        System.arraycopy(data, 0, ds.values, 0, this.size);
+            new DenseObjectSegmentDataset(axes, values);
+        System.arraycopy(values, 0, ds.values, 0, values.length);
         return ds;
     }
 }

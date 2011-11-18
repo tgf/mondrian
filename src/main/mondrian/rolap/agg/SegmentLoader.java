@@ -55,12 +55,6 @@ public class SegmentLoader {
     private final AggregationManager aggMgr;
     private final List<SegmentCacheWorker> segmentCacheWorkers;
 
-    /**
-     * List of segments loaded.
-     */
-    private final Map<Segment, Pair<SegmentWithData, Throwable>>
-        loadedSegmentList =
-        new HashMap<Segment, Pair<SegmentWithData, Throwable>>();
 
     /**
      * Creates a SegmentLoader.
@@ -107,16 +101,6 @@ public class SegmentLoader {
         List<GroupingSet> groupingSets,
         List<StarPredicate> compoundPredicateList)
     {
-        // Simple assertion. Is this Execution instance still valid,
-        // or should we get outa here.
-        Locus.peek().execution.checkCancelOrTimeout();
-
-        // First check for cached segments.
-        // This method will remove all the segments it fetched from
-        // the cache from the groupingSets list.
-        if (false)
-        loadSegmentsFromCache(groupingSets, compoundPredicateList);
-
         // Now try to load the segments from a rollup
         // operation of other segments.
         if (false)
@@ -128,13 +112,87 @@ public class SegmentLoader {
             return Collections.emptyList();
         }
 
+        final Map<Segment, SlotFuture<SegmentWithData>> map =
+            new IdentityHashMap<Segment, SlotFuture<SegmentWithData>>();
+        final List<Future<SegmentWithData>> list =
+            new ArrayList<Future<SegmentWithData>>();
+        for (GroupingSet groupingSet : groupingSets) {
+            for (Segment segment : groupingSet.getSegments()) {
+                final SlotFuture<SegmentWithData> future =
+                    new SlotFuture<SegmentWithData>();
+                map.put(segment, future);
+                list.add(future);
+            }
+        }
+        aggMgr.sqlExecutor.execute(
+            new SegmentLoadCommand(
+                Locus.peek(),
+                this,
+                cellRequestCount,
+                groupingSets,
+                compoundPredicateList,
+                map));
+        return Collections.unmodifiableList(list);
+    }
+
+    private static class SegmentLoadCommand implements Runnable {
+        private final Locus locus;
+        private final SegmentLoader segmentLoader;
+        private final int cellRequestCount;
+        private final List<GroupingSet> groupingSets;
+        private final List<StarPredicate> compoundPredicateList;
+        private final Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap;
+
+        public SegmentLoadCommand(
+            Locus locus,
+            SegmentLoader segmentLoader,
+            int cellRequestCount,
+            List<GroupingSet> groupingSets,
+            List<StarPredicate> compoundPredicateList,
+            Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
+        {
+            this.locus = locus;
+            this.segmentLoader = segmentLoader;
+            this.cellRequestCount = cellRequestCount;
+            this.groupingSets = groupingSets;
+            this.compoundPredicateList = compoundPredicateList;
+            this.segmentSlotMap = segmentSlotMap;
+        }
+
+        public void run() {
+            Locus.push(locus);
+            try {
+                segmentLoader.loadImpl(
+                    cellRequestCount,
+                    groupingSets,
+                    compoundPredicateList,
+                    segmentSlotMap);
+            } catch (Throwable e) {
+                // Argh! What to do with this? We're returning a
+                // list-of-futures; do we put the exception in each list item?
+                e.printStackTrace();
+            } finally {
+                Locus.pop(locus);
+            }
+        }
+    }
+
+    private void loadImpl(
+        int cellRequestCount,
+        List<GroupingSet> groupingSets,
+        List<StarPredicate> compoundPredicateList,
+        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
+    {
+        // Simple assertion. Is this Execution instance still valid,
+        // or should we get outa here.
+        Locus.peek().execution.checkCancelOrTimeout();
+
         SqlStatement stmt = null;
         GroupingSetsList groupingSetsList =
             new GroupingSetsList(groupingSets);
         RolapStar.Column[] defaultColumns =
             groupingSetsList.getDefaultColumns();
 
-        Throwable throwable = null;
         try {
             int arity = defaultColumns.length;
             SortedSet<Comparable<?>>[] axisValueSets =
@@ -170,40 +228,31 @@ public class SegmentLoader {
             loadDataToDataSets(
                 groupingSetsList, rows, groupingDataSetsMap);
 
-            setDataToSegments(groupingSetsList, groupingDataSetsMap);
-
-            cacheSegmentData(
-                groupingSets,
+            setDataToSegments(
+                groupingSetsList,
+                groupingDataSetsMap,
                 compoundPredicateList,
-                axisValueSets,
-                axisContainsNull);
-
-            final ArrayList<Future<SegmentWithData>> list =
-                new ArrayList<Future<SegmentWithData>>();
-            for (Pair<SegmentWithData, Throwable> pair
-                : loadedSegmentList.values())
-            {
-                list.add(
-                    new CompletedFuture<SegmentWithData>(
-                        pair.left,
-                        pair.right == null
-                            ? null
-                            : new ExecutionException(pair.right)));
-            }
-            return list;
+                segmentSlotMap);
         } catch (Error e) {
-            throwable = e;
-            throw e;
+            // Any segments which are still loading have failed. If all have
+            // finished, we have no way to pass back the error, so throw.
+            if (!setFailOnStillLoadingSegments(
+                    segmentSlotMap, groupingSetsList, e))
+            {
+                throw e;
+            }
         } catch (Throwable e) {
-            throwable = e;
-            throw stmt.handle(e);
+            // Any segments which are still loading have failed. If all have
+            // finished, we have no way to pass back the error, so throw.
+            RuntimeException rte = stmt.handle(e);
+            if (!setFailOnStillLoadingSegments(
+                    segmentSlotMap, groupingSetsList, rte))
+            {
+                throw rte;
+            }
         } finally {
             if (stmt != null) {
                 stmt.close();
-            }
-            if (throwable != null) {
-                // Any segments which are still loading have failed.
-                setFailOnStillLoadingSegments(groupingSetsList, throwable);
             }
         }
     }
@@ -215,52 +264,6 @@ public class SegmentLoader {
             }
         }
         return false;
-    }
-
-    /**
-     * Tries to load the segments from the cache. If a segment
-     * can be loaded successfully, it will be removed from the
-     * list passed as the groupingSets argument.
-     *
-     * @param groupingSets List of segments to lookup.
-     */
-    private void loadSegmentsFromCache(
-        List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList)
-    {
-        for (SegmentCacheWorker segmentCacheWorker : segmentCacheWorkers) {
-            final List<GroupingSet> gsToRemove =
-                new ArrayList<GroupingSet>();
-            for (GroupingSet groupingSet : groupingSets) {
-                final List<Segment> segmentsToRemove =
-                    new ArrayList<Segment>();
-
-                for (Segment segment : groupingSet.getSegments()) {
-                    final SegmentHeader sh =
-                        SegmentHeader.forSegment(
-                            segment, compoundPredicateList);
-                    if (!segmentCacheWorker.contains(sh)) {
-                        continue;
-                    }
-                    final SegmentBody sb = segmentCacheWorker.get(sh);
-                    // Make sure to dereference as the cache might have removed
-                    // the data between calls to contains() and get().
-                    if (sb != null) {
-                        segmentsToRemove.add(segment);
-                        loadedSegmentList.put(
-                            segment,
-                            Pair.of(
-                                SegmentHeader.addData(segment, sb),
-                                (Throwable) null));
-                    }
-                }
-                groupingSet.getSegments().removeAll(segmentsToRemove);
-                if (groupingSet.getSegments().size() == 0) {
-                    gsToRemove.add(groupingSet);
-                }
-            }
-            groupingSets.removeAll(gsToRemove);
-        }
     }
 
     /**
@@ -281,7 +284,7 @@ public class SegmentLoader {
                     if (loadSegmentFromCacheRollup(
                             compoundPredicateList,
                             segmentCacheWorker,
-                            segment))
+                            segment, null))
                     {
                         // Remove this segment from the list of segments to
                         // load.
@@ -303,7 +306,8 @@ public class SegmentLoader {
     private boolean loadSegmentFromCacheRollup(
         List<StarPredicate> compoundPredicateList,
         SegmentCacheWorker segmentCacheWorker,
-        final Segment segment)
+        final Segment segment,
+        HashMap<Segment, Pair<SegmentWithData, Throwable>> map)
     {
         final SegmentHeader headerRef =
             SegmentHeader.forSegment(segment, compoundPredicateList);
@@ -419,7 +423,7 @@ public class SegmentLoader {
         }
 
         // Set the data object.
-        loadedSegmentList.put(
+        map.put(
             segment,
             Pair.of(
                 SegmentHeader.addData(segment, sb),
@@ -454,69 +458,50 @@ public class SegmentLoader {
     }
 
     /**
-     * Caches segments to the external {@link mondrian.spi.SegmentCache}, if
-     * configured.
+     * Called when a segment has been loaded from SQL, to put into the segment
+     * index and the external cache.
      *
-     * @param groupingSets Grouping sets
-     * @param axisValueSets Axis value sets
-     * @param nullAxisFlags Null axis flags
+     * @param segment Loaded segment
      */
-    void cacheSegmentData(
-        List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicates,
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+    private void cacheSegment(
+        final SegmentWithData segment)
     {
-        for (final GroupingSet groupingSet : groupingSets) {
-            for (Segment segment : groupingSet.getSegments()) {
-                final SegmentWithData segmentWithData;
-//                try {
-                    // TODO: The exceptions here are telling us something.
-                    // This method should not be called until
-                    // load of each segment is known to have completed.
-                    // It should be in a different event handler.
-                    segmentWithData = loadedSegmentList.get(segment).left;
-//                } catch (InterruptedException e) {
-//                    throw Util.newError(e, "While loading segment");
-//                } catch (ExecutionException e) {
-//                    final Throwable cause = e.getCause();
-//                    if (cause instanceof RuntimeException) {
-//                        throw (RuntimeException) cause;
-//                    } else if (cause instanceof Error) {
-//                        throw (Error) cause;
-//                    } else {
-//                        throw Util.newError(cause, "While loading segment");
-//                    }
-//                }
-                final SegmentHeader header =
-                    SegmentHeader.forSegment(segment, compoundPredicates);
-                final SegmentBody body =
-                    segmentWithData.getData().createSegmentBody(
-                        axisValueSets,
-                        nullAxisFlags);
-                for (SegmentCacheWorker segmentCacheWorker
-                    : segmentCacheWorkers)
-                {
-                    segmentCacheWorker.put(header, body);
-                }
-                aggMgr.segmentIndex.add(header);
-            }
-        }
+        final SegmentHeader header =
+            SegmentHeader.forSegment(
+                segment, segment.getCompoundPredicateList());
+        final SegmentBody body =
+            segment.getData().createSegmentBody(
+                new AbstractList<Pair<SortedSet<Comparable<?>>, Boolean>>() {
+                    public Pair<SortedSet<Comparable<?>>, Boolean> get(
+                        int index)
+                    {
+                        return segment.axes[index].getValuesAndIndicator();
+                    }
+
+                    public int size() {
+                        return segment.axes.length;
+                    }
+                });
+        aggMgr.cacheMgr.add(aggMgr, header, body);
     }
 
-    private void setFailOnStillLoadingSegments(
+    private boolean setFailOnStillLoadingSegments(
+        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap,
         GroupingSetsList groupingSetsList,
-        Throwable e)
+        Throwable throwable)
     {
+        int n = 0;
         for (GroupingSet groupingset : groupingSetsList.getGroupingSets()) {
             for (Segment segment : groupingset.getSegments()) {
-                if (!loadedSegmentList.containsKey(segment)) {
-                    loadedSegmentList.put(
-                        segment,
-                        Pair.of((SegmentWithData) null, e));
+                final SlotFuture<SegmentWithData> slot =
+                    segmentSlotMap.get(segment);
+                if (!slot.isDone()) {
+                    slot.fail(throwable);
+                    ++n;
                 }
             }
         }
+        return n > 0;
     }
 
     /**
@@ -570,7 +555,10 @@ public class SegmentLoader {
                     if (o == null) {
                         o = RolapUtil.sqlNullValue;
                     }
-                    int offset = axis.getOffset(o);
+                    // Note: We believe that all value types are Comparable.
+                    // In JDK 1.4, Boolean did not implement Comparable, but
+                    // that's too minor/long ago to worry about.
+                    int offset = axis.getOffset((Comparable) o);
                     pos[k++] = offset;
                     break;
                 default:
@@ -628,26 +616,34 @@ public class SegmentLoader {
 
     private void setDataToSegments(
         GroupingSetsList groupingSetsList,
-        Map<BitKey, GroupingSetsList.Cohort> datasetsMap)
+        Map<BitKey, GroupingSetsList.Cohort> datasetsMap,
+        List<StarPredicate> compoundPredicateList,
+        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
     {
         List<GroupingSet> groupingSets = groupingSetsList.getGroupingSets();
         for (int i = 0; i < groupingSets.size(); i++) {
-            List<Segment> groupedSegments = groupingSets.get(i).getSegments();
+            List<Segment> segments = groupingSets.get(i).getSegments();
             GroupingSetsList.Cohort cohort =
                 datasetsMap.get(
                     groupingSetsList.getRollupColumnsBitKeyList().get(i));
-            for (int j = 0; j < groupedSegments.size(); j++) {
-                Segment groupedSegment = groupedSegments.get(j);
+            for (int j = 0; j < segments.size(); j++) {
+                Segment segment = segments.get(j);
                 final SegmentDataset segmentDataset =
                     cohort.segmentDatasetList.get(j);
-                loadedSegmentList.put(
-                    groupedSegment,
-                    Pair.of(
-                        new SegmentWithData(
-                            groupedSegment,
-                            segmentDataset,
-                            cohort.axes),
-                        (Throwable) null));
+                final SegmentWithData segmentWithData =
+                    new SegmentWithData(
+                        segment,
+                        segmentDataset,
+                        cohort.axes);
+
+                // Send a message to the client statement, telling it that its
+                // segment is ready.
+                segmentSlotMap.get(segment).put(
+                    segmentWithData);
+
+                // Send a message to the agg manager. It will place the segment
+                // in the index.
+                cacheSegment(segmentWithData);
             }
         }
     }
@@ -822,7 +818,10 @@ public class SegmentLoader {
                             axisContainsNull[axisIndex] = true;
                         }
                     } else {
-                        axisValueSets[axisIndex].add(SegmentAxis.wrap(o));
+                        // We assume that all values are Comparable. Boolean
+                        // wasn't Comparable until JDK 1.5, but we can live with
+                        // that bug because JDK 1.4 is no longer important.
+                        axisValueSets[axisIndex].add((Comparable<?>) o);
                     }
                     processedRows.setObject(columnIndex, o);
                     break;

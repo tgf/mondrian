@@ -30,12 +30,14 @@ abstract class DenseNativeSegmentDataset extends DenseSegmentDataset {
      * Creates a DenseNativeSegmentDataset.
      *
      * @param axes Segment axes, containing actual column values
-     * @param size Number of coordinates
+     * @param nullIndicators Null indicators
      */
-    DenseNativeSegmentDataset(SegmentAxis[] axes, int size) {
+    DenseNativeSegmentDataset(
+        SegmentAxis[] axes,
+        BitSet nullIndicators)
+    {
         super(axes);
-        this.nullIndicators = new BitSet(size);
-        this.nullIndicators.set(0, size, false);
+        this.nullIndicators = nullIndicators;
     }
 
     public boolean isNull(CellKey key) {

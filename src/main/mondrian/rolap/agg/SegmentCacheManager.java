@@ -11,6 +11,8 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
+import mondrian.rolap.cache.SegmentCacheIndex;
+import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.util.Pair;
 
 import java.util.*;
@@ -89,11 +91,23 @@ import java.util.concurrent.*;
  *
  * <p>13. Add new implementations of Future: CompletedFuture and SlotFuture.</p>
  *
+ * <p>14. Remove methods:<p>
+ * <ul>
+ *
+ * <li>Remove {@link SegmentLoader}.loadSegmentsFromCache - creates a
+ *   {@link SegmentHeader} that has PRECISELY same specification as the
+ *   requested segment, very unlikely to have a hit</li>
+ *
+ * <li>Remove {@link SegmentLoader}.loadSegmentFromCacheRollup</li>
+ *
+ * <li>Break up {@link SegmentLoader}.cacheSegmentData, and
+ *   place code that is called after a segment has arrived</li>
+ *
+ * </ul>
  *
  *
  * <h2>Done but not checked in</h2>
  *
- * -
  *
  *
  *
@@ -150,20 +164,6 @@ import java.util.concurrent.*;
  * Previously called from
  * {@link RolapStar}.checkAggregateModifications, now never called.</p>
  *
- * <p>11. Remove following:<p>
- * <ul>
- *
- * <li>{@link SegmentLoader#loadSegmentsFromCache} - creates a
- *   {@link SegmentHeader} that has PRECISELY same specification as the
- *   requested segment, very unlikely to have a hit</li>
- *
- * <li>{@link SegmentLoader}.loadSegmentFromCacheRollup - DONE</li>
- *
- * <li>{@link SegmentLoader#cacheSegmentData}: don't remove, but break up, and
- *   place code that is called after a segment has arrived</li>
- *
- * </ul>
- *
  * <p>12. Remove SegmentHeader.forCacheRegion (1 use), replace with
  * List&lt;SegmentHeader&gt;
  * SegmentCacheIndex.findHeadersOverlapping(RolapCacheRegion).
@@ -195,10 +195,6 @@ import java.util.concurrent.*;
  * SegmentWithData is imperfect. Cannot parse predicates, compound predicates.
  * Need mapping in star to do it properly and efficiently?
  * See {@link SegmentHeader#toSegment}.</p>
- *
- * <p>16. Is {@link SegmentLoader#loadSegmentsFromCache} still doing something
- * useful? We should have checked the cache before we created batches + grouping
- * sets.</p>
  *
  * <p>17. Revisit the strategy for finding segments that can be copied from
  * global and external cache into local cache. The strategy of sending N
@@ -235,6 +231,9 @@ import java.util.concurrent.*;
  */
 public class SegmentCacheManager {
     private final Handler handler = new Handler();
+
+    public final SegmentCacheIndex segmentIndex =
+        new SegmentCacheIndexImpl(ACTOR.thread);
 
     private static final Actor ACTOR = new Actor();
 
@@ -288,14 +287,22 @@ public class SegmentCacheManager {
     }
 
     /**
-     * Tells the cache that a segment from an external cache is available.
+     * Adds segment to segment index and cache.
      *
-     * <p>Called by an external cache worker.</p>
+     * <p>Called when a SQL statement has finished loading a segment.</p>
+     *
+     * @param aggMgr Aggregate manager
+     * @param header segment header
+     * @param body segment body
      */
-    public void loadFromExternalSucceeded(
+    public void add(
+        AggregationManager aggMgr,
         SegmentHeader header,
         SegmentBody body)
     {
+        ACTOR.event(
+            handler,
+            new SegmentAddEvent(aggMgr, header, body));
     }
 
     /**
@@ -340,16 +347,13 @@ public class SegmentCacheManager {
      * Visitor for messages (commands and events).
      */
     public interface Visitor {
-        Void visit(SegmentLoadSucceededEvent event);
-        Void visit(SegmentLoadFailedEvent event);
+        void visit(SegmentLoadSucceededEvent event);
+        void visit(SegmentLoadFailedEvent event);
+        void visit(SegmentAddEvent event);
     }
 
     private static class Handler implements Visitor {
-        private final Map<Segment, List<FutureTask<Segment>>>
-            segmentCompletionTasks =
-            new HashMap<Segment, List<FutureTask<Segment>>>();
-
-        public Void visit(SegmentLoadSucceededEvent event) {
+        public void visit(SegmentLoadSucceededEvent event) {
             // 1. put dataset inside segment (create new segment?) and place it
             // in index;
             // 2. inform external cache
@@ -371,8 +375,20 @@ public class SegmentCacheManager {
             throw new UnsupportedOperationException(); // TODO:
         }
 
-        public Void visit(SegmentLoadFailedEvent event) {
+        public void visit(SegmentLoadFailedEvent event) {
             throw new UnsupportedOperationException(); // TODO:
+        }
+
+        public void visit(SegmentAddEvent event) {
+            event.aggMgr.cacheMgr.segmentIndex.add(event.header);
+            if (event.body == null) {
+                return;
+            }
+            for (SegmentCacheWorker segmentCacheWorker
+                : event.aggMgr.segmentCacheWorkers)
+            {
+                segmentCacheWorker.put(event.header, event.body);
+            }
         }
     }
 
@@ -495,7 +511,11 @@ public class SegmentCacheManager {
      * abstracting common code.
      */
     private static class Actor implements Runnable {
-        private boolean running = true;
+        /**
+         * Current thread. Not null if and only if actor is running. Can be used
+         * to check that data structures are called from the dedicated thread.
+         */
+        private Thread thread;
 
         private final BlockingQueue<Pair<Handler, Message>> eventQueue =
             new ArrayBlockingQueue<Pair<Handler, Message>>(1000);
@@ -505,6 +525,7 @@ public class SegmentCacheManager {
             new ResponseQueue<Command, Pair<Object, Throwable>>(1000);
 
         public void run() {
+            thread = Thread.currentThread();
             try {
                 for (;;) {
                     final Pair<Handler, Message> entry = eventQueue.take();
@@ -545,14 +566,14 @@ public class SegmentCacheManager {
                 // REVIEW: Somewhere better to send it?
                 e.printStackTrace();
             } finally {
-                running = false;
+                thread = null;
             }
         }
 
         public void shutdown() {
             // No point sending a command if (for some reason) there's no thread
             // listening to the command queue.
-            if (running) {
+            if (thread != null) {
                 execute(null, new ShutdownCommand());
             }
         }
@@ -621,6 +642,28 @@ public class SegmentCacheManager {
         {
             this.segment = segment;
             this.throwable = throwable;
+        }
+
+        public void acceptWithoutResponse(Visitor visitor) {
+            visitor.visit(this);
+        }
+    }
+
+    private static class SegmentAddEvent extends Event {
+        private final AggregationManager aggMgr;
+        private final SegmentHeader header;
+        private final SegmentBody body;
+
+        public SegmentAddEvent(
+            AggregationManager aggMgr,
+            SegmentHeader header,
+            SegmentBody body)
+        {
+            assert header != null;
+            assert aggMgr != null;
+            this.aggMgr = aggMgr;
+            this.header = header;
+            this.body = body; // may be null
         }
 
         public void acceptWithoutResponse(Visitor visitor) {

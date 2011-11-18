@@ -12,9 +12,9 @@
 */
 package mondrian.rolap.agg;
 
-import mondrian.olap.Util;
 import mondrian.rolap.CellKey;
 import mondrian.rolap.SqlStatement;
+import mondrian.util.Pair;
 
 import java.util.*;
 
@@ -89,14 +89,11 @@ class SparseSegmentDataset implements SegmentDataset {
     }
 
     public SegmentBody createSegmentBody(
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
-        return
-            new SparseSegmentBody(
-                values,
-                axisValueSets,
-                nullAxisFlags);
+        return new SparseSegmentBody(
+            values,
+            axes);
     }
 }
 

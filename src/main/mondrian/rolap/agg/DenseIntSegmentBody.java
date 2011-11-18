@@ -9,8 +9,9 @@
 */
 package mondrian.rolap.agg;
 
-import java.util.BitSet;
-import java.util.SortedSet;
+import mondrian.util.Pair;
+
+import java.util.*;
 
 /**
  * Implementation of a segment body which stores the data inside
@@ -21,35 +22,35 @@ import java.util.SortedSet;
  */
 class DenseIntSegmentBody extends AbstractSegmentBody {
     private static final long serialVersionUID = 5391233622968115488L;
-    final int[] data;
-    private final int size;
+
+    private final int[] values;
     private final BitSet nullIndicators;
 
+    /**
+     * Creates a DenseIntSegmentBody.
+     *
+     * <p>Stores the given array of cell values and null indicators; caller must
+     * not modify them afterwards.</p>
+     *
+     * @param nullIndicators Null indicators
+     * @param values Cell values
+     * @param axes Axes
+     */
     DenseIntSegmentBody(
         BitSet nullIndicators,
-        int[] dataToSave,
-        int size,
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        int[] values,
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
-        super(axisValueSets, nullAxisFlags);
-        this.size = size;
-        this.data = new int[size];
-        System.arraycopy(dataToSave, 0, data, 0, size);
-        this.nullIndicators = new BitSet(nullIndicators.length());
-        this.nullIndicators.or(nullIndicators);
+        super(axes);
+        this.values = values;
+        this.nullIndicators = nullIndicators;
     }
 
     public SegmentDataset createSegmentDataset(
         Segment segment,
         SegmentAxis[] axes)
     {
-        DenseIntSegmentDataset ds =
-            new DenseIntSegmentDataset(axes, this.size);
-        System.arraycopy(data, 0, ds.values, 0, this.size);
-        ds.nullIndicators.clear();
-        ds.nullIndicators.or(nullIndicators);
-        return ds;
+        return new DenseIntSegmentDataset(axes, values, nullIndicators);
     }
 }
 

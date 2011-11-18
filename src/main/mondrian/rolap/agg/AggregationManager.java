@@ -24,7 +24,7 @@ import mondrian.util.Pair;
 import org.apache.log4j.Logger;
 
 import java.util.*;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 /**
  * <code>RolapAggregationManager</code> manages all {@link Aggregation}s
@@ -49,8 +49,12 @@ public class AggregationManager extends RolapAggregationManager {
 
     private static AggregationManager instance;
 
-    public final SegmentCacheIndex segmentIndex =
-        new SegmentCacheIndexImpl();
+    // TODO: create using factory and/or configuration parameters. Executor
+    //   should be shared within MondrianServer or target JDBC database.
+    public final Executor sqlExecutor =
+        new ThreadPoolExecutor(
+            3, 10, 1, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<Runnable>(10));
 
     /**
      * Returns or creates the singleton.

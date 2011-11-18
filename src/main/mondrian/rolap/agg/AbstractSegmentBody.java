@@ -9,6 +9,9 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.util.Pair;
+
+import java.util.List;
 import java.util.SortedSet;
 
 /**
@@ -24,12 +27,17 @@ abstract class AbstractSegmentBody implements SegmentBody {
     private final boolean[] nullAxisFlags;
 
     public AbstractSegmentBody(
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
         super();
-        this.axisValueSets = axisValueSets.clone();
-        this.nullAxisFlags = nullAxisFlags.clone();
+        //noinspection unchecked
+        this.axisValueSets = new SortedSet[axes.size()];
+        this.nullAxisFlags = new boolean[axes.size()];
+        for (int i = 0; i < axes.size(); i++) {
+            Pair<SortedSet<Comparable<?>>, Boolean> pair = axes.get(i);
+            axisValueSets[i] = pair.left;
+            nullAxisFlags[i] = pair.right;
+        }
     }
 
     public SortedSet<Comparable<?>>[] getAxisValueSets() {

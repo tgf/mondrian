@@ -1119,6 +1119,124 @@ public class UtilTestCase extends TestCase {
         set.addAll(Arrays.asList(empty0, two, three, two, empty1, three));
         assertEquals(3, set.size());
     }
+
+    public void testArraySortedSet() {
+        String[] abce = {"a", "b", "c", "e"};
+        final SortedSet<String> abceSet =
+            new ArraySortedSet<String>(abce);
+
+        // test size, isEmpty, contains
+        assertEquals(4, abceSet.size());
+        assertFalse(abceSet.isEmpty());
+        assertEquals("a", abceSet.first());
+        assertEquals("e", abceSet.last());
+        assertTrue(abceSet.contains("a"));
+        assertFalse(abceSet.contains("aa"));
+        assertFalse(abceSet.contains("z"));
+        assertFalse(abceSet.contains(null));
+        checkToString("[a, b, c, e]", abceSet);
+
+        // test iterator
+        String z = "";
+        for (String s : abceSet) {
+            z += s + ";";
+        }
+        assertEquals("a;b;c;e;", z);
+
+        // empty set
+        String[] empty = {};
+        final SortedSet<String> emptySet =
+            new ArraySortedSet<String>(empty);
+        int n = 0;
+        for (String s : emptySet) {
+            ++n;
+        }
+        assertEquals(0, n);
+        assertEquals(0, emptySet.size());
+        assertTrue(emptySet.isEmpty());
+        try {
+            String s = emptySet.first();
+            fail("expected exception, got " + s);
+        } catch (NoSuchElementException e) {
+            // ok
+        }
+        try {
+            String s = emptySet.last();
+            fail("expected exception, got " + s);
+        } catch (NoSuchElementException e) {
+            // ok
+        }
+        assertFalse(emptySet.contains("a"));
+        assertFalse(emptySet.contains("aa"));
+        assertFalse(emptySet.contains("z"));
+        checkToString("[]", emptySet);
+
+        // same hashCode etc. as similar hashset
+        final HashSet<String> abcHashset = new HashSet<String>();
+        abcHashset.addAll(Arrays.asList(abce));
+        assertEquals(abcHashset, abceSet);
+        assertEquals(abceSet, abcHashset);
+        assertEquals(abceSet.hashCode(), abcHashset.hashCode());
+
+        // subset to end
+        final Set<String> subsetEnd = new ArraySortedSet<String>(abce, 1, 4);
+        checkToString("[b, c, e]", subsetEnd);
+        assertEquals(3, subsetEnd.size());
+        assertFalse(subsetEnd.isEmpty());
+        assertTrue(subsetEnd.contains("c"));
+        assertFalse(subsetEnd.contains("a"));
+        assertFalse(subsetEnd.contains("z"));
+
+        // subset from start
+        final Set<String> subsetStart = new ArraySortedSet<String>(abce, 0, 2);
+        checkToString("[a, b]", subsetStart);
+        assertEquals(2, subsetStart.size());
+        assertFalse(subsetStart.isEmpty());
+        assertTrue(subsetStart.contains("a"));
+        assertFalse(subsetStart.contains("c"));
+
+        // subset from neither start or end
+        final Set<String> subset = new ArraySortedSet<String>(abce, 1, 2);
+        checkToString("[b]", subset);
+        assertEquals(1, subset.size());
+        assertFalse(subset.isEmpty());
+        assertTrue(subset.contains("b"));
+        assertFalse(subset.contains("a"));
+        assertFalse(subset.contains("e"));
+
+        // empty subset
+        final Set<String> subsetEmpty = new ArraySortedSet<String>(abce, 1, 1);
+        checkToString("[]", subsetEmpty);
+        assertEquals(0, subsetEmpty.size());
+        assertTrue(subsetEmpty.isEmpty());
+        assertFalse(subsetEmpty.contains("e"));
+
+        // subsets based on elements, not ordinals
+        assertEquals(abceSet.subSet("a", "c"), subsetStart);
+        assertEquals("[a, b, c]", abceSet.subSet("a", "d").toString());
+        assertFalse(abceSet.subSet("a", "e").equals(subsetStart));
+        assertFalse(abceSet.subSet("b", "c").equals(subsetStart));
+        assertEquals("[c, e]", abceSet.subSet("c", "z").toString());
+        assertEquals("[e]", abceSet.subSet("d", "z").toString());
+        assertFalse(abceSet.subSet("e", "c").equals(subsetStart));
+        assertEquals("[]", abceSet.subSet("e", "c").toString());
+        assertFalse(abceSet.subSet("z", "c").equals(subsetStart));
+        assertEquals("[]", abceSet.subSet("z", "c").toString());
+    }
+
+    private void checkToString(String expected, Set<String> set) {
+        assertEquals(expected, set.toString());
+
+        final List<String> list = new ArrayList<String>();
+        list.addAll(set);
+        assertEquals(expected, list.toString());
+
+        list.clear();
+        for (String s : set) {
+            list.add(s);
+        }
+        assertEquals(expected, list.toString());
+    }
 }
 
 // End UtilTestCase.java

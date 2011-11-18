@@ -10,9 +10,9 @@
 package mondrian.rolap.agg;
 
 import mondrian.rolap.CellKey;
+import mondrian.util.Pair;
 
-import java.util.Map;
-import java.util.SortedSet;
+import java.util.*;
 
 /**
  * Implementation of a segment body which stores the data of a
@@ -28,10 +28,9 @@ class SparseSegmentBody extends AbstractSegmentBody {
 
     SparseSegmentBody(
         Map<CellKey, Object> dataToSave,
-        SortedSet<Comparable<?>>[] axisValueSets,
-        boolean[] nullAxisFlags)
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
-        super(axisValueSets, nullAxisFlags);
+        super(axes);
 
         this.keys = new CellKey[dataToSave.size()];
         this.data = new Object[dataToSave.size()];

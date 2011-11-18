@@ -170,6 +170,13 @@ public class Segment {
     }
 
     /**
+     * Returns the list of compound predicates.
+     */
+    public List<StarPredicate> getCompoundPredicateList() {
+        return compoundPredicateList;
+    }
+
+    /**
      * Returns the BitKey for ALL columns (Measures and Levels) involved in the
      * query.
      */

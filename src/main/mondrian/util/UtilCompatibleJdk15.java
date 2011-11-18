@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  * @version $Id$
  * @since Feb 5, 2007
  */
-public abstract class UtilCompatibleJdk15 implements UtilCompatible {
+public class UtilCompatibleJdk15 implements UtilCompatible {
     private final static Logger LOGGER =
         Logger.getLogger(Util.class);
 

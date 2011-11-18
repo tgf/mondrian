@@ -153,7 +153,7 @@ public class SegmentWithData extends Segment {
         int missed = 0;
         CellKey cellKey = CellKey.Generator.newCellKey(axes.length);
         for (int i = 0; i < keys.length; i++) {
-            Object key = keys[i];
+            Comparable key = (Comparable) keys[i];
             int offset = axes[i].getOffset(key);
             if (offset < 0) {
                 if (axes[i].wouldContain(key)) {
