@@ -91,6 +91,12 @@ public class UtilCompatibleJdk16 extends UtilCompatibleJdk15 {
         return Collections.newSetFromMap(
             new IdentityHashMap<T, Boolean>());
     }
+
+    public <T extends Comparable<T>> int binarySearch(
+        T[] ts, int start, int end, T t)
+    {
+        return Arrays.binarySearch(ts, start, end, t);
+    }
 }
 
 // End UtilCompatibleJdk16.java

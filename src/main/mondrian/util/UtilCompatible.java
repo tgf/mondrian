@@ -15,6 +15,7 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.Statement;
 import java.util.Set;
+import java.util.Timer;
 
 /**
  * Interface containing methods which are implemented differently in different
@@ -84,6 +85,31 @@ public interface UtilCompatible {
      * @return Set
      */
     <T> Set<T> newIdentityHashSet();
+
+    /**
+     * As {@link Arrays#binarySearch(Object[], int, int, Object)}, but
+     * available pre-JDK 1.6.
+     */
+    <T extends Comparable<T>> int binarySearch(T[] ts, int start, int end, T t);
+
+    /**
+     * Creates an object from which to get information about system memory
+     * use. From JDK 1.5 onwards, uses
+     * {@link java.lang.management.MemoryPoolMXBean}.
+     *
+     * @return Memory info
+     */
+    Util.MemoryInfo getMemoryInfo();
+
+    /**
+     * Equivalent to {@link Timer#Timer(String, boolean)}.
+     * (Introduced in JDK 1.5.)
+     *
+     * @param name the name of the associated thread
+     * @param isDaemon true if the associated thread should run as a daemon
+     * @return timer
+     */
+    Timer newTimer(String name, boolean isDaemon);
 }
 
 // End UtilCompatible.java

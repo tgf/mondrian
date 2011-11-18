@@ -15,6 +15,7 @@ import mondrian.resource.MondrianResource;
 import org.apache.log4j.Logger;
 
 import java.lang.annotation.Annotation;
+import java.lang.management.*;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
@@ -101,6 +102,43 @@ public abstract class UtilCompatibleJdk15 implements UtilCompatible {
         threadLocal.remove();
     }
 
+    public Util.MemoryInfo getMemoryInfo() {
+        return new Util.MemoryInfo() {
+            protected final MemoryPoolMXBean TENURED_POOL =
+                findTenuredGenPool();
+
+            public Util.MemoryInfo.Usage get() {
+                final MemoryUsage memoryUsage = TENURED_POOL.getUsage();
+                return new Usage() {
+                    public long getUsed() {
+                        return memoryUsage.getUsed();
+                    }
+
+                    public long getCommitted() {
+                        return memoryUsage.getCommitted();
+                    }
+
+                    public long getMax() {
+                        return memoryUsage.getMax();
+                    }
+                };
+            }
+        };
+    }
+
+    public Timer newTimer(String name, boolean isDaemon) {
+        return new Timer(name, isDaemon);
+    }
+
+    private static MemoryPoolMXBean findTenuredGenPool() {
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() == MemoryType.HEAP) {
+                return pool;
+            }
+        }
+        throw new AssertionError("Could not find tenured space");
+    }
+
     public void cancelAndCloseStatement(Statement stmt) {
         try {
             stmt.cancel();
@@ -128,6 +166,13 @@ public abstract class UtilCompatibleJdk15 implements UtilCompatible {
 
     public <T> Set<T> newIdentityHashSet() {
         return Util.newIdentityHashSetFake();
+    }
+
+    public <T extends Comparable<T>> int binarySearch(
+        T[] ts, int start, int end, T t)
+    {
+        return Collections.binarySearch(
+            Arrays.asList(ts).subList(start, end), t);
     }
 }
 

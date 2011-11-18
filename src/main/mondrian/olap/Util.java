@@ -1600,6 +1600,10 @@ public class Util extends XOMUtil {
         compatible.cancelAndCloseStatement(stmt);
     }
 
+    public static MemoryInfo getMemoryInfo() {
+        return compatible.getMemoryInfo();
+    }
+
     /**
      * Converts a list of a string.
      *
@@ -2118,6 +2122,28 @@ public class Util extends XOMUtil {
                 map.clear();
             }
         };
+    }
+
+    /**
+     * Equivalent to {@link Timer#Timer(String, boolean)}.
+     * (Introduced in JDK 1.5.)
+     *
+     * @param name the name of the associated thread
+     * @param isDaemon true if the associated thread should run as a daemon
+     * @return timer
+     */
+    public static Timer newTimer(String name, boolean isDaemon) {
+        return compatible.newTimer(name, isDaemon);
+    }
+
+    /**
+     * As {@link Arrays#binarySearch(Object[], int, int, Object)}, but
+     * available pre-JDK 1.6.
+     */
+    public static <T extends Comparable<T>> int binarySearch(
+        T[] ts, int start, int end, T t)
+    {
+        return compatible.binarySearch(ts, start, end, t);
     }
 
     public static class ErrorCellValue {
@@ -4013,6 +4039,21 @@ public class Util extends XOMUtil {
                 return true;
             }
         };
+
+    /**
+     * Information about memory usage.
+     *
+     * @see mondrian.olap.Util#getMemoryInfo()
+     */
+    public interface MemoryInfo {
+        Usage get();
+
+        public interface Usage {
+            long getUsed();
+            long getCommitted();
+            long getMax();
+        }
+    }
 }
 
 // End Util.java

@@ -18,8 +18,7 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Random;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Implementation of {@link UtilCompatible} which runs in
@@ -110,6 +109,30 @@ public class UtilCompatibleJdk14 implements UtilCompatible {
         // nothing: ThreadLocal.remove() does not exist until JDK 1.5
     }
 
+    public Util.MemoryInfo getMemoryInfo() {
+        return new Util.MemoryInfo() {
+            public Usage get() {
+                return new Usage() {
+                    public long getUsed() {
+                        return 0;
+                    }
+
+                    public long getCommitted() {
+                        return 0;
+                    }
+
+                    public long getMax() {
+                        return 0;
+                    }
+                };
+            }
+        };
+    }
+
+    public Timer newTimer(String name, boolean isDaemon) {
+        return new Timer(isDaemon);
+    }
+
     public void cancelAndCloseStatement(Statement stmt) {
         try {
             stmt.cancel();
@@ -137,6 +160,13 @@ public class UtilCompatibleJdk14 implements UtilCompatible {
 
     public <T> Set<T> newIdentityHashSet() {
         return Util.newIdentityHashSetFake();
+    }
+
+    public <T extends Comparable<T>> int binarySearch(
+        T[] ts, int start, int end, T t)
+    {
+        return Collections.binarySearch(
+            Arrays.asList(ts).subList(start, end), t);
     }
 }
 
