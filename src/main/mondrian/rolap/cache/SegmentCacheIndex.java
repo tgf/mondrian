@@ -57,13 +57,6 @@ public interface SegmentCacheIndex {
      * Removes a header from the index.
      */
     void remove(SegmentHeader header);
-
-    /**
-     * Returns a list of all the segment headers that are currently
-     * indexed.
-     * <p>Use this method only for testing, as it may result
-     */
-    List<SegmentHeader> getAllHeaders();
 }
 
 // End SegmentCacheIndex.java

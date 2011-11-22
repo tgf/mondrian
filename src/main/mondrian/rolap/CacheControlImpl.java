@@ -15,6 +15,7 @@ import mondrian.resource.MondrianResource;
 import mondrian.rolap.agg.SegmentCacheManager;
 import mondrian.rolap.agg.SegmentHeader;
 import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.rolap.sql.MemberChildrenConstraint;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
@@ -503,7 +504,8 @@ public class CacheControlImpl implements CacheControl {
             new SegmentCacheManager.Command<Void>() {
                 public Void call() throws Exception {
                     final List<SegmentHeader> headers =
-                        manager.segmentIndex.getAllHeaders();
+                        ((SegmentCacheIndexImpl)manager.segmentIndex)
+                            .getAllHeaders();
                     for (SegmentHeader header : headers) {
                         pw.println(header.getDescription());
                     }
