@@ -12,6 +12,7 @@ package mondrian.rolap.cache;
 import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
 import mondrian.rolap.agg.SegmentHeader;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.util.ByteString;
 
 import java.util.*;
@@ -45,7 +46,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String measureName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        Map<String, Comparable<?>> coords)
+        Map<String, Comparable<?>> coords,
+        String[] compoundPredicates)
     {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
@@ -59,7 +61,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                     measureName,
                     rolapStarFactTableName,
                     constrainedColsBitKey,
-                    coords))
+                    coords,
+                    compoundPredicates))
             {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
@@ -78,6 +81,10 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         headerList.add(header);
     }
 
+    public void remove(SegmentHeader header) {
+        headerList.remove(header);
+    }
+
     private boolean matches(
         SegmentHeader header,
         String schemaName,
@@ -86,16 +93,18 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String measureName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        Map<String, Comparable<?>> coords)
+        Map<String, Comparable<?>> coords,
+        String[] compoundPredicates)
     {
         // most selective condition first
-        if (!header.constrainedColsBitKey.equals(constrainedColsBitKey)) {
+        if (!header.getConstrainedColumnsBitKey()
+            .equals(constrainedColsBitKey))
+        {
             return false;
         }
         if (!header.schemaName.equals(schemaName)) {
             return false;
         }
-        // REVIEW: make schemaChecksum mandatory?
         if (!Util.equals(header.schemaChecksum, schemaChecksum)) {
             return false;
         }
@@ -108,7 +117,23 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         if (!header.rolapStarFactTableName.equals(rolapStarFactTableName)) {
             return false;
         }
+        if (!Arrays.equals(header.compoundPredicates, compoundPredicates)) {
+            return false;
+        }
         for (Map.Entry<String, Comparable<?>> entry : coords.entrySet()) {
+            // Check if the segment explicitly excludes this coordinate.
+            final SegmentHeader.ConstrainedColumn excludedColumn =
+                header.getExcludedRegion(entry.getKey());
+            if (excludedColumn != null) {
+                final Object[] values = excludedColumn.getValues();
+                if (values == null
+                    || Arrays.asList(values).contains(entry.getValue()))
+                {
+                    return false;
+                }
+            }
+            // Check if the dimensionality of the segment intersects
+            // with the coordinate.
             final SegmentHeader.ConstrainedColumn constrainedColumn =
                 header.getConstrainedColumn(entry.getKey());
             if (constrainedColumn == null) {
@@ -125,6 +150,100 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             }
         }
         return true;
+    }
+
+    public List<SegmentHeader> intersectRegion(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String measureName,
+        String rolapStarFactTableName,
+        ConstrainedColumn[] region)
+    {
+        assert thread == Thread.currentThread()
+            : "expected " + thread + ", but was " + Thread.currentThread();
+        List<SegmentHeader> list = Collections.emptyList();
+        for (SegmentHeader header : headerList) {
+            if (intersects(
+                    header,
+                    schemaName,
+                    schemaChecksum,
+                    cubeName,
+                    measureName,
+                    rolapStarFactTableName,
+                    region))
+            {
+                // Be lazy. Don't allocate a list unless there is at least one
+                // entry.
+                if (list.isEmpty()) {
+                    list = new ArrayList<SegmentHeader>();
+                }
+                list.add(header);
+            }
+        }
+        return list;
+    }
+
+    private boolean intersects(
+        SegmentHeader header,
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String measureName,
+        String rolapStarFactTableName,
+        ConstrainedColumn[] region)
+    {
+        // most selective condition first
+        if (!header.schemaName.equals(schemaName)) {
+            return false;
+        }
+        if (!Util.equals(header.schemaChecksum, schemaChecksum)) {
+            return false;
+        }
+        if (!header.cubeName.equals(cubeName)) {
+            return false;
+        }
+        if (!header.measureName.equals(measureName)) {
+            return false;
+        }
+        if (!header.rolapStarFactTableName.equals(rolapStarFactTableName)) {
+            return false;
+        }
+        if (region.length == 0) {
+            return true;
+        }
+        for (ConstrainedColumn regionColumn : region) {
+            final SegmentHeader.ConstrainedColumn headerColumn =
+                header.getConstrainedColumn(regionColumn.getColumnExpression());
+            if (headerColumn == null) {
+                /*
+                 * If the segment header doesn't contain a column specified
+                 * by the region, then it always implicitly intersects.
+                 * This allows flush operations to be valid.
+                 */
+                return true;
+            }
+            final Object[] regionValues = regionColumn.getValues();
+            final Object[] headerValues = regionColumn.getValues();
+            if (headerValues == null || regionValues == null) {
+                /*
+                 * This is a wildcard, so it always intersects.
+                 */
+                return true;
+            }
+            final Set<Object> headerValuesHashedSet =
+                new HashSet<Object>(Arrays.asList(headerValues));
+            for (Object myValue : regionValues) {
+                if (headerValuesHashedSet.contains(myValue)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public List<SegmentHeader> getAllHeaders() {
+        return Collections.unmodifiableList(headerList);
     }
 }
 

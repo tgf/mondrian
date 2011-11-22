@@ -14,6 +14,7 @@ import mondrian.olap.MondrianProperties;
 import mondrian.rolap.agg.SegmentBody;
 import mondrian.rolap.agg.SegmentHeader;
 import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentCache.SegmentCacheListener.SegmentCacheEvent;
 
 import java.util.List;
 import java.util.concurrent.Future;
@@ -95,16 +96,83 @@ public interface SegmentCache {
     Future<Boolean> remove(SegmentHeader header);
 
     /**
-     * Flushes a dimensionality region from the cache.
-     * @param region The region to flush.
-     * @return True if the operation succeeded,
-     * false otherwise.
-     */
-    Future<Boolean> flush(ConstrainedColumn[] region);
-
-    /**
      * Tear down and clean up the cache.
      */
     void tearDown();
+
+    /**
+     * Adds a listener to this segment cache implementation.
+     * The listener will get notified via {@link SegmentCacheEvent}
+     * instances.
+     * @param l The listener to attach to this cache.
+     */
+    void addListener(SegmentCacheListener l);
+
+    /**
+     * Unregisters a listener from this segment cache implementation.
+     * @param l The listener to remove.
+     */
+    void removeListener(SegmentCacheListener l);
+
+    /**
+     * Tells Mondrian whether this segment cache uses the {@link SegmentHeader}
+     * objects as an index, thus preserving them in a serialized state, or if
+     * it uses its identification number only. Not using a rich index prevents
+     * Mondrian from doing partial cache invalidation.
+     */
+    boolean supportsRichIndex();
+
+    /**
+     * {@link SegmentCacheListener} objects are used to listen
+     * to the state of the cache and be notified of changes to its
+     * state or its entries. Mondrian will automatically register
+     * a listener with the implementations it uses.
+     */
+    interface SegmentCacheListener {
+        /**
+         * Handle an event
+         * @param e Event to handle.
+         */
+        void handle(SegmentCacheEvent e);
+
+        /**
+         * Defines the event types that a listener can look for.
+         */
+        interface SegmentCacheEvent {
+            /**
+             * Defined the possible types of events used by
+             * the {@link SegmentCacheListener} class.
+             */
+            enum EventType {
+                /**
+                 * An Entry was created in cache.
+                 */
+                ENTRY_CREATED,
+                /**
+                 * An entry was deleted from the cache.
+                 */
+                ENTRY_DELETED
+            }
+
+            /**
+             * Returns the event type of the current SegmentCacheEvent
+             * instance.
+             */
+            EventType getEventType();
+
+            /**
+             * Returns the segment header at the source of the event.
+             */
+            SegmentHeader getSource();
+
+            /**
+             * Tells whether or not this event was a local event or
+             * an event triggered by an operation on a remote node.
+             * If the implementation cannot differentiate or doesn't
+             * support remote nodes, always return false.
+             */
+            boolean isLocal();
+        }
+    }
 }
 // End SegmentCache.java

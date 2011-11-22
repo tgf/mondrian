@@ -12,6 +12,9 @@ package mondrian.rolap;
 import mondrian.olap.*;
 import mondrian.olap.Id.Quoting;
 import mondrian.resource.MondrianResource;
+import mondrian.rolap.agg.SegmentCacheManager;
+import mondrian.rolap.agg.SegmentHeader;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.rolap.sql.MemberChildrenConstraint;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
@@ -22,6 +25,7 @@ import java.io.PrintWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.util.*;
+import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import javax.sql.DataSource;
 
@@ -402,7 +406,7 @@ public class CacheControlImpl implements CacheControl {
      * @param region Cell region
      * @return List of members mentioned in cell region specification
      */
-    static List<Member> findMeasures(CellRegion region) {
+    public static List<Member> findMeasures(CellRegion region) {
         final List<Member> list = new ArrayList<Member>();
         final CellRegionVisitor visitor =
             new CellRegionVisitorImpl() {
@@ -423,7 +427,51 @@ public class CacheControlImpl implements CacheControl {
         return list;
     }
 
-    static List<RolapStar> getStarList(CellRegion region) {
+    public static ConstrainedColumn[] findAxisValues(CellRegion region) {
+        final List<ConstrainedColumn> list =
+            new ArrayList<ConstrainedColumn>();
+        final CellRegionVisitor visitor =
+            new CellRegionVisitorImpl() {
+                public void visit(MemberCellRegion region) {
+                    if (region.dimension.isMeasures()) {
+                        return;
+                    }
+                    final Map<String, Set<Object>> levels =
+                        new HashMap<String, Set<Object>>();
+                    for (Member member : region.memberList) {
+                        final String ccName =
+                            ((RolapLevel)member.getLevel())
+                                .getKeyExp().getGenericExpression();
+                        if (!levels.containsKey(ccName)) {
+                            levels.put(ccName, new HashSet<Object>());
+                        }
+                        levels.get(ccName).add(
+                            ((RolapMember)member).getKey());
+                    }
+                    for (Entry<String, Set<Object>> entry
+                        : levels.entrySet())
+                    {
+                        list.add(
+                            new ConstrainedColumn(
+                                entry.getKey(),
+                                entry.getValue().toArray()));
+                    }
+                }
+                public void visit(MemberRangeCellRegion region) {
+                    // We translate all ranges into wildcards.
+                    // FIXME Optimize this by resolving the list of members
+                    // into an actual list of values for ConstrainedColumn
+                    list.add(
+                        new ConstrainedColumn(
+                            region.level.getKeyExp().getGenericExpression(),
+                            null));
+                }
+            };
+        ((CellRegionImpl) region).accept(visitor);
+        return list.toArray(new ConstrainedColumn[list.size()]);
+    }
+
+    public static List<RolapStar> getStarList(CellRegion region) {
         // Figure out which measure (therefore star) it belongs to.
         List<RolapStar> starList = new ArrayList<RolapStar>();
         final List<Member> measuresList = findMeasures(region);
@@ -441,13 +489,27 @@ public class CacheControlImpl implements CacheControl {
     }
 
     public void printCacheState(
-        PrintWriter pw,
+        final PrintWriter pw,
         CellRegion region)
     {
         List<RolapStar> starList = getStarList(region);
         for (RolapStar star : starList) {
             star.print(pw, "", false);
         }
+        final SegmentCacheManager manager =
+            MondrianServer.forConnection(connection)
+                .getAggregationManager().cacheMgr;
+        manager.execute(
+            new SegmentCacheManager.Command<Void>() {
+                public Void call() throws Exception {
+                    final List<SegmentHeader> headers =
+                        manager.segmentIndex.getAllHeaders();
+                    for (SegmentHeader header : headers) {
+                        pw.println(header.getDescription());
+                    }
+                    return null;
+                }
+            });
     }
 
     public MemberSet createMemberSet(Member member, boolean descendants)

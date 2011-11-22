@@ -218,9 +218,11 @@ import java.util.concurrent.*;
  * <h2>Questions for Luc</h2>
  *
  * <p>1. Is a SegmentCache supposed to be thread-safe?</p>
+ * <p>no.</p>
  *
  * <p>2. SegmentCache.put - should it return {@code Future<Boolean>} or
  * {@code Future<Void>}?</p>
+ * <p>whichever. doesn't really matter.</p>
  *
  * <p>3. SegmentCache.flush - too much burden on the cache provider?  Instead,
  * SegmentCacheIndex should identify segment headers that overlap with the
@@ -307,40 +309,27 @@ public class SegmentCacheManager {
 
     /**
      * Tells the cache that a segment is newly available in an external cache.
-     *
-     * <p>Not currently called. Will be called when we extend the
-     * {@link mondrian.spi.SegmentCache} SPI:</p>
-     *
-     * <pre>
-     * void addListener(Listener);
-     *
-     * interface Listener {
-     *     void segmentCreated(SegmentHeader);
-     *     void segmentDeleted(SegmentHeader);
-     * }
-     * </pre>
-     *
-     * @param header Header
      */
     public void externalSegmentCreated(
+        AggregationManager aggMgr,
         SegmentHeader header)
     {
-        // TODO: add segment to index of what is available in external cache
+        ACTOR.event(
+            handler,
+            new ExternalSegmentCreatedEvent(aggMgr, header));
     }
 
     /**
      * Tells the cache that a segment is no longer available in an external
      * cache.
-     *
-     * <p>Not currently called. See
-     * {@link #externalSegmentCreated(SegmentHeader)} for details.</p>
-     *
-     * @param header Header
      */
     public void externalSegmentDeleted(
+        AggregationManager aggMgr,
         SegmentHeader header)
     {
-        // TODO: remove segment to index of what is available in external cache
+        ACTOR.event(
+            handler,
+            new ExternalSegmentDeletedEvent(aggMgr, header));
     }
 
     /**
@@ -350,6 +339,8 @@ public class SegmentCacheManager {
         void visit(SegmentLoadSucceededEvent event);
         void visit(SegmentLoadFailedEvent event);
         void visit(SegmentAddEvent event);
+        void visit(ExternalSegmentCreatedEvent event);
+        void visit(ExternalSegmentDeletedEvent event);
     }
 
     private static class Handler implements Visitor {
@@ -389,6 +380,14 @@ public class SegmentCacheManager {
             {
                 segmentCacheWorker.put(event.header, event.body);
             }
+        }
+
+        public void visit(ExternalSegmentCreatedEvent event) {
+            event.aggMgr.cacheMgr.segmentIndex.add(event.header);
+        }
+
+        public void visit(ExternalSegmentDeletedEvent event) {
+            event.aggMgr.cacheMgr.segmentIndex.remove(event.header);
         }
     }
 
@@ -664,6 +663,44 @@ public class SegmentCacheManager {
             this.aggMgr = aggMgr;
             this.header = header;
             this.body = body; // may be null
+        }
+
+        public void acceptWithoutResponse(Visitor visitor) {
+            visitor.visit(this);
+        }
+    }
+
+    private static class ExternalSegmentCreatedEvent extends Event {
+        private final AggregationManager aggMgr;
+        private final SegmentHeader header;
+
+        public ExternalSegmentCreatedEvent(
+            AggregationManager aggMgr,
+            SegmentHeader header)
+        {
+            assert header != null;
+            assert aggMgr != null;
+            this.aggMgr = aggMgr;
+            this.header = header;
+        }
+
+        public void acceptWithoutResponse(Visitor visitor) {
+            visitor.visit(this);
+        }
+    }
+
+    private static class ExternalSegmentDeletedEvent extends Event {
+        private final AggregationManager aggMgr;
+        private final SegmentHeader header;
+
+        public ExternalSegmentDeletedEvent(
+            AggregationManager aggMgr,
+            SegmentHeader header)
+        {
+            assert header != null;
+            assert aggMgr != null;
+            this.aggMgr = aggMgr;
+            this.header = header;
         }
 
         public void acceptWithoutResponse(Visitor visitor) {

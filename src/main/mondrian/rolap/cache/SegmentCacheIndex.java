@@ -11,8 +11,8 @@ package mondrian.rolap.cache;
 
 import mondrian.rolap.BitKey;
 import mondrian.rolap.agg.SegmentHeader;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.util.ByteString;
-import mondrian.util.Pair;
 
 import java.util.List;
 import java.util.Map;
@@ -36,13 +36,34 @@ public interface SegmentCacheIndex {
         String measureName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        Map<String, Comparable<?>> coords);
+        Map<String, Comparable<?>> coords,
+        String[] compoundPredicates);
+
+    public List<SegmentHeader> intersectRegion(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String measureName,
+        String rolapStarFactTableName,
+        ConstrainedColumn[] region);
 
     /**
      * Adds a header to the index.
      */
     void add(
         SegmentHeader header);
+
+    /**
+     * Removes a header from the index.
+     */
+    void remove(SegmentHeader header);
+
+    /**
+     * Returns a list of all the segment headers that are currently
+     * indexed.
+     * <p>Use this method only for testing, as it may result
+     */
+    List<SegmentHeader> getAllHeaders();
 }
 
 // End SegmentCacheIndex.java

@@ -11,6 +11,7 @@ package mondrian.util;
 
 import mondrian.olap.Util;
 
+import java.io.Serializable;
 import java.util.*;
 
 /**
@@ -24,8 +25,9 @@ import java.util.*;
  */
 public class ArraySortedSet<E extends Comparable<E>>
     extends AbstractSet<E>
-    implements SortedSet<E>
+    implements SortedSet<E>, Serializable
 {
+    private static final long serialVersionUID = -7613058579094914399L;
     private final E[] values;
     private final int start;
     private final int end;

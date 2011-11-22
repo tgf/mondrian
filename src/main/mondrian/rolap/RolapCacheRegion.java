@@ -27,6 +27,8 @@ public class RolapCacheRegion {
     private final BitKey bitKey;
     private final Map<Integer, StarColumnPredicate> columnPredicates =
         new HashMap<Integer, StarColumnPredicate>();
+    private final Map<String, StarColumnPredicate> columnPredicatesByName =
+        new HashMap<String, StarColumnPredicate>();
     private Map<List<RolapStar.Column>, StarPredicate> predicates =
         new HashMap<List<RolapStar.Column>, StarPredicate>();
 
@@ -58,6 +60,9 @@ public class RolapCacheRegion {
         assert !bitKey.get(bitPosition);
         bitKey.set(bitPosition);
         columnPredicates.put(bitPosition, predicate);
+        columnPredicatesByName.put(
+            column.getExpression().getGenericExpression(),
+            predicate);
     }
 
     /**
@@ -69,6 +74,20 @@ public class RolapCacheRegion {
      */
     public StarColumnPredicate getPredicate(int columnOrdinal) {
         return columnPredicates.get(columnOrdinal);
+    }
+
+    /**
+     * Returns the predicate associated with the
+     * <code>columnName</code>, where column name is
+     * the generic SQL expression in the form of:
+     *
+     * <p>&nbsp;&nbsp;&nbsp;&nbsp;table.column
+     *
+     * @param columnOrdinal Column ordinal
+     * @return Predicate, or null if not constrained
+     */
+    public StarColumnPredicate getPredicate(String columnName) {
+        return columnPredicatesByName.get(columnName);
     }
 
     /**

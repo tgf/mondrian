@@ -12,17 +12,24 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.CacheControl;
+import mondrian.olap.CacheControl.CellRegion;
+import mondrian.olap.Member;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.SqlStatement.Type;
+import mondrian.rolap.agg.SegmentCacheManager.Command;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.rolap.cache.*;
+import mondrian.server.Locus;
 import mondrian.spi.SegmentCache;
 import mondrian.util.Pair;
 
 import org.apache.log4j.Logger;
 
+import java.io.PrintWriter;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -43,7 +50,7 @@ public class AggregationManager extends RolapAggregationManager {
         Logger.getLogger(AggregationManager.class);
 
     public final List<SegmentCacheWorker> segmentCacheWorkers =
-        new ArrayList<SegmentCacheWorker>();
+        new CopyOnWriteArrayList<SegmentCacheWorker>();
 
     public final SegmentCacheManager cacheMgr = new SegmentCacheManager();
 
@@ -81,12 +88,20 @@ public class AggregationManager extends RolapAggregationManager {
                 "Property " + properties.EnableCacheHitCounters.getPath()
                 + " is obsolete; ignored.");
         }
-        segmentCacheWorkers.add(
-            new SegmentCacheWorker(
-                new MemorySegmentCache()));
+        // Add a local cache, if needed.
+        if (!MondrianProperties.instance().DisableCaching.get()) {
+            final MemorySegmentCache cache = new MemorySegmentCache();
+            segmentCacheWorkers.add(
+                new SegmentCacheWorker(cache));
+        }
+        // Add an external cache, if configured.
         final SegmentCache externalCache = SegmentCacheWorker.initCache();
         if (externalCache != null) {
+            // Create a worker for this external cache
             segmentCacheWorkers.add(new SegmentCacheWorker(externalCache));
+            // Hook up a listener so it can update
+            // the segment index.
+            externalCache.addListener(new AsyncCacheListener(this));
         }
     }
 
@@ -132,6 +147,151 @@ public class AggregationManager extends RolapAggregationManager {
             groupingSetsCollector);
     }
 
+    /**
+     * Returns an API with which to explicitly manage the contents of the cache.
+     *
+     * @param connection Server whose cache to control
+     * @param pw Print writer, for tracing
+     * @return CacheControl API
+     */
+    public CacheControl getCacheControl(
+        RolapConnection connection,
+        final PrintWriter pw)
+    {
+        return new CacheControlImpl(connection) {
+            protected void flushNonUnion(final CellRegion region) {
+              cacheMgr.execute(
+                  new FlushCommand(region, this));
+            }
+
+            public void flush(final CellRegion region) {
+                if (pw != null) {
+                    pw.println("Cache state before flush:");
+                    printCacheState(pw, region);
+                    pw.println();
+                }
+                super.flush(region);
+                if (pw != null) {
+                    pw.println("Cache state after flush:");
+                    printCacheState(pw, region);
+                    pw.println();
+                }
+            }
+
+            public void trace(final String message) {
+                if (pw != null) {
+                    pw.println(message);
+                }
+            }
+        };
+    }
+
+    private final class FlushCommand implements Command<Void> {
+        private final CellRegion region;
+        private final CacheControlImpl cacheControlImpl;
+        public FlushCommand(
+            final CellRegion region,
+            final CacheControlImpl cacheControlImpl)
+        {
+            this.region = region;
+            this.cacheControlImpl = cacheControlImpl;
+        }
+        public Void call() throws Exception {
+            /*
+             * For each measure and each star, ask the index
+             * which headers intersect.
+             */
+            final List<SegmentHeader> headers =
+                new ArrayList<SegmentHeader>();
+            final List<Member> measures =
+                CacheControlImpl.findMeasures(region);
+            final ConstrainedColumn[] flushRegion =
+                CacheControlImpl.findAxisValues(region);
+
+            for (Member member : measures) {
+                if (!(member instanceof RolapStoredMeasure)) {
+                    continue;
+                }
+                RolapStoredMeasure storedMeasure =
+                    (RolapStoredMeasure) member;
+                headers.addAll(
+                    cacheMgr.segmentIndex.intersectRegion(
+                        member.getDimension().getSchema().getName(),
+                        ((RolapSchema)member.getDimension()
+                            .getSchema()).getChecksum(),
+                        storedMeasure.getCube().getName(),
+                        storedMeasure.getName(),
+                        storedMeasure.getCube().getStar()
+                            .getFactTable().getAlias(),
+                        flushRegion));
+            }
+
+            // If flushregion is empty, this means we must clear all
+            // segments for the region's measures.
+            if (flushRegion.length == 0) {
+                for (SegmentHeader header : headers) {
+                    for (SegmentCacheWorker worker
+                        : AggregationManager.this.segmentCacheWorkers)
+                    {
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                        cacheMgr.segmentIndex.remove(header);
+                    }
+                }
+                return null;
+            }
+
+            // Now we know which headers intersect. For each of them,
+            // we append an excluded region.
+            // TODO optimize the logic here. If a segment is mostly
+            // empty, we should thrash it completely.
+            for (SegmentHeader header : headers) {
+                if (!header.canConstrain(flushRegion)) {
+                    // We have to delete that segment altogether.
+                    cacheControlImpl.trace(
+                        "discard segment - it cannot be constrained and maintain consistency: "
+                        + header.getDescription());
+                    for (SegmentCacheWorker worker
+                        : AggregationManager.this.segmentCacheWorkers)
+                    {
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                    }
+                    cacheMgr.segmentIndex.remove(header);
+                    continue;
+                }
+                final SegmentHeader newHeader =
+                    header.constrain(flushRegion);
+                for (SegmentCacheWorker worker
+                    : AggregationManager.this.segmentCacheWorkers)
+                {
+                    if (worker.supportsRichIndex()) {
+                        final SegmentBody sb = worker.get(header);
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                        if (sb != null) {
+                            worker.put(newHeader, sb);
+                        }
+                    } else {
+                        // The cache doesn't support rich index. We have
+                        // to clear the segment entirely.
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                    }
+                }
+                cacheMgr.segmentIndex.remove(header);
+                cacheMgr.segmentIndex.add(newHeader);
+            }
+
+            // Done
+            return null;
+        }
+    }
+
     public Object getCellFromCache(CellRequest request) {
         return getCellFromCache(request, null);
     }
@@ -145,6 +305,11 @@ public class AggregationManager extends RolapAggregationManager {
         // SegmentCacheManager will copy it into local cache.
         final RolapStar.Measure measure = request.getMeasure();
         return measure.getStar().getCellFromCache(request, pinSet);
+    }
+
+    public Object getCellFromAllCaches(CellRequest request) {
+        final RolapStar.Measure measure = request.getMeasure();
+        return measure.getStar().getCellFromAllCaches(request);
     }
 
     public String getDrillThroughSql(
@@ -445,6 +610,63 @@ System.out.println(buf.toString());
         extends HashSet<Segment>
         implements RolapAggregationManager.PinSet
     {
+    }
+
+    /**
+     * This is an implementation of SegmentCacheListener which updates the
+     * segment index of its aggregation manager instance when it receives
+     * events from its assigned SegmentCache implementation.
+     */
+    private static class AsyncCacheListener
+        implements SegmentCache.SegmentCacheListener
+    {
+        private final AggregationManager aggMan;
+        public AsyncCacheListener(AggregationManager aggMan) {
+            this.aggMan = aggMan;
+        }
+        public void handle(final SegmentCacheEvent e) {
+            final SegmentCacheManager.Command<Void> command;
+            final Locus locus = Locus.peek();
+            switch (e.getEventType()) {
+            case ENTRY_CREATED:
+                command =
+                    new SegmentCacheManager.Command<Void>() {
+                        public Void call() throws Exception {
+                            Locus.push(locus);
+                            try {
+                                aggMan.cacheMgr
+                                    .externalSegmentCreated(
+                                        aggMan,
+                                        e.getSource());
+                                return null;
+                            } finally {
+                                Locus.pop(locus);
+                            }
+                        }
+                    };
+                break;
+            case ENTRY_DELETED:
+                command =
+                    new SegmentCacheManager.Command<Void>() {
+                        public Void call() throws Exception {
+                            Locus.push(locus);
+                            try {
+                                aggMan.cacheMgr
+                                    .externalSegmentDeleted(
+                                        aggMan,
+                                        e.getSource());
+                                return null;
+                            } finally {
+                                Locus.pop(locus);
+                            }
+                        }
+                    };
+                break;
+            default:
+                throw new UnsupportedOperationException();
+            }
+            aggMan.cacheMgr.execute(command);
+        }
     }
 }
 

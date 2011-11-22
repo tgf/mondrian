@@ -11,7 +11,6 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.MondrianProperties;
 import mondrian.resource.MondrianResource;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.spi.SegmentCache;
 import mondrian.util.ServiceDiscovery;
 
@@ -259,46 +258,6 @@ public final class SegmentCacheWorker {
     }
 
     /**
-     * Flushes a segment from the cache. Returns true or false
-     * if the operation succeeds.
-     *
-     * <p>To adjust timeout values, set the
-     * {@link MondrianProperties#SegmentCacheWriteTimeout} property.
-     *
-     * @param region A region to flush from the segment cache.
-     */
-    public void flush(ConstrainedColumn[] region) {
-        try {
-            final boolean result =
-                cache.flush(region)
-                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
-            if (!result) {
-                LOGGER.error(
-                    MondrianResource.instance()
-                        .SegmentCacheFailedToDeleteSegment
-                        .baseMessage);
-                throw MondrianResource.instance()
-                    .SegmentCacheFailedToDeleteSegment.ex();
-            }
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheReadTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheReadTimeout.ex(e);
-        } catch (Throwable t) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheFailedToDeleteSegment
-                    .baseMessage,
-                t);
-            throw MondrianResource.instance()
-                .SegmentCacheFailedToDeleteSegment.ex(t);
-        }
-    }
-
-    /**
      * Returns a list of segments present in the cache.
      *
      * <p>If no cache is configured or there is an error while
@@ -325,6 +284,10 @@ public final class SegmentCacheWorker {
             throw MondrianResource.instance()
                 .SegmentCacheFailedToScanSegments.ex(t);
         }
+    }
+
+    public boolean supportsRichIndex() {
+        return cache.supportsRichIndex();
     }
 }
 

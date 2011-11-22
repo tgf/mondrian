@@ -150,23 +150,14 @@ public class FastBatchingCellReader implements CellReader {
     private void recordCellRequest2(
         CellRequest request)
     {
-        final Map<String, Comparable<?>> map =
-            new HashMap<String, Comparable<?>>();
-        final RolapStar.Column[] columns =
-            request.getConstrainedColumns();
-        final Object[] values = request.getSingleValues();
-        for (int i = 0; i < columns.length; i++) {
-            RolapStar.Column column = columns[i];
-            final Object o = values[i];
-            map.put(
-                column.getExpression().getGenericExpression(),
-                (Comparable<?>) o);
-        }
-
         // If there is a segment matching these criteria, write it to the list
         // of found segments, and remove the cell request from the list.
+        final AggregationKey key = new AggregationKey(request);
         Pair<SegmentHeader, SegmentBody> headerBody =
-            locateHeaderBody(request, map);
+            locateHeaderBody(
+                request,
+                request.getMappedCellValues(),
+                key);
         if (headerBody != null) {
             // A previous cell request in this request might have hit the same
             // segment. Only create a segment the first time we see this segment
@@ -189,10 +180,9 @@ public class FastBatchingCellReader implements CellReader {
             return;
         }
 
-        // TOOD: try to roll up
+        // TODO: try to roll up
 
         // Finally, add to a batch. It will turn in to a SQL request.
-        final AggregationKey key = new AggregationKey(request);
         Batch batch = batches.get(key);
         if (batch == null) {
             batch = new Batch(request);
@@ -204,7 +194,9 @@ public class FastBatchingCellReader implements CellReader {
                 buf.append(request.getConstrainedColumnsBitKey());
                 buf.append(Util.nl);
 
-                for (RolapStar.Column column : columns) {
+                for (RolapStar.Column column
+                    : request.getConstrainedColumns())
+                {
                     buf.append("  ");
                     buf.append(column);
                     buf.append(Util.nl);
@@ -220,11 +212,13 @@ public class FastBatchingCellReader implements CellReader {
      *
      * @param request Cell request
      * @param map Column values
+     * @param key Aggregate key.
      * @return Segment header and body
      */
     private Pair<SegmentHeader, SegmentBody> locateHeaderBody(
         CellRequest request,
-        Map<String, Comparable<?>> map)
+        Map<String, Comparable<?>> map,
+        AggregationKey key)
     {
         final List<SegmentHeader> locate =
             aggMgr.cacheMgr.segmentIndex.locate(
@@ -234,7 +228,10 @@ public class FastBatchingCellReader implements CellReader {
                 request.getMeasure().getName(),
                 request.getMeasure().getStar().getFactTable().getAlias(),
                 request.getConstrainedColumnsBitKey(),
-                map);
+                map,
+                AggregationKey.getCompoundPredicateArray(
+                    key.getStar(),
+                    key.getCompoundPredicateList()));
         for (SegmentHeader header : locate) {
             for (SegmentCacheWorker worker : aggMgr.segmentCacheWorkers) {
                 final SegmentBody body = worker.get(header);

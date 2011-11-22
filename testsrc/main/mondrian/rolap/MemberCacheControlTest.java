@@ -515,7 +515,7 @@ public class MemberCacheControlTest extends FoodMartTestCase {
             ((RolapConnection) conn).getServer().getAggregationManager();
         assertEquals(
             Double.valueOf("74748"),
-            aggMgr.getCellFromCache(
+            aggMgr.getCellFromAllCaches(
                 AggregationManager.makeRequest(cacheRegionMembers)));
 
         // Now tell the cache that [CA].[Berkeley] is new
@@ -525,7 +525,7 @@ public class MemberCacheControlTest extends FoodMartTestCase {
 
         // test that cells have been removed
         assertNull(
-            aggMgr.getCellFromCache(
+            aggMgr.getCellFromAllCaches(
                 AggregationManager.makeRequest(cacheRegionMembers)));
 
         tc.assertAxisReturns(
@@ -671,7 +671,7 @@ public class MemberCacheControlTest extends FoodMartTestCase {
             ((RolapConnection) conn).getServer().getAggregationManager();
         assertEquals(
             Double.valueOf("2117"),
-            aggMgr.getCellFromCache(
+            aggMgr.getCellFromAllCaches(
                 AggregationManager.makeRequest(cacheRegionMembers)));
 
         // Now tell the cache that [CA].[San Francisco] has been removed.
@@ -686,7 +686,7 @@ public class MemberCacheControlTest extends FoodMartTestCase {
 
         // test that cells have been removed
         assertNull(
-            aggMgr.getCellFromCache(
+            aggMgr.getCellFromAllCaches(
                 AggregationManager.makeRequest(cacheRegionMembers)));
 
         // The list of children should be updated.

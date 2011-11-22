@@ -9,6 +9,7 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.MondrianException;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
@@ -242,6 +243,9 @@ public class SegmentLoader {
                 throw e;
             }
         } catch (Throwable e) {
+            if (stmt == null) {
+                throw new MondrianException(e);
+            }
             // Any segments which are still loading have failed. If all have
             // finished, we have no way to pass back the error, so throw.
             RuntimeException rte = stmt.handle(e);
@@ -309,8 +313,7 @@ public class SegmentLoader {
         final Segment segment,
         HashMap<Segment, Pair<SegmentWithData, Throwable>> map)
     {
-        final SegmentHeader headerRef =
-            SegmentHeader.forSegment(segment, compoundPredicateList);
+        final SegmentHeader headerRef = segment.getHeader();
 
         // First step is to build a set of segments which have the
         // same dimensionality as the segment we're trying to load.
@@ -466,9 +469,7 @@ public class SegmentLoader {
     private void cacheSegment(
         final SegmentWithData segment)
     {
-        final SegmentHeader header =
-            SegmentHeader.forSegment(
-                segment, segment.getCompoundPredicateList());
+        final SegmentHeader header = segment.getHeader();
         final SegmentBody body =
             segment.getData().createSegmentBody(
                 new AbstractList<Pair<SortedSet<Comparable<?>>, Boolean>>() {

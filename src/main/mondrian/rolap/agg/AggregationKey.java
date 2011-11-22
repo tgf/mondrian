@@ -11,6 +11,7 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
+import mondrian.rolap.sql.SqlQuery;
 
 import java.util.*;
 
@@ -189,6 +190,27 @@ public class AggregationKey
         return compoundPredicateList;
     }
 
+    /**
+     * Returns an array of compound predicates.
+     *
+     * @return array of predicates
+     */
+    public static String[] getCompoundPredicateArray(
+        RolapStar star,
+        List<StarPredicate> compoundPredicateList)
+    {
+        final List<String> cp = new ArrayList<String>();
+        final StringBuilder buf = new StringBuilder();
+        for (StarPredicate compoundPredicate : compoundPredicateList) {
+            buf.setLength(0);
+            SqlQuery query =
+                new SqlQuery(
+                    star.getSqlQueryDialect());
+            compoundPredicate.toSql(query, buf);
+            cp.add(buf.toString());
+        }
+        return cp.toArray(new String[cp.size()]);
+    }
 }
 
 // End AggregationKey.java

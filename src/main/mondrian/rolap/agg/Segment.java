@@ -14,6 +14,8 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.rolap.sql.SqlQuery;
 
 import org.apache.log4j.Logger;
 
@@ -100,10 +102,12 @@ public class Segment {
      * physically in the segment, because trimming segments can be expensive,
      * but should still be ignored.
      */
-    protected final List<Region> excludedRegions;
+    protected final List<ExcludedRegion> excludedRegions;
 
     private final int aggregationKeyHashCode;
     protected final List<StarPredicate> compoundPredicateList;
+
+    private final SegmentHeader segmentHeader;
 
     private static final Logger LOGGER = Logger.getLogger(Segment.class);
 
@@ -121,7 +125,7 @@ public class Segment {
         RolapStar.Column[] columns,
         RolapStar.Measure measure,
         StarColumnPredicate[] predicates,
-        List<Region> excludedRegions,
+        List<ExcludedRegion> excludedRegions,
         final List<StarPredicate> compoundPredicateList)
     {
         this.id = nextId++;
@@ -131,9 +135,6 @@ public class Segment {
         this.measure = measure;
         this.predicates = predicates;
         this.excludedRegions = excludedRegions;
-        for (Region region : excludedRegions) {
-            assert region.getPredicates().size() == predicates.length;
-        }
         this.compoundPredicateList = compoundPredicateList;
         final List<BitKey> compoundPredicateBitKeys =
             compoundPredicateList == null
@@ -153,6 +154,7 @@ public class Segment {
                 constrainedColumnsBitKey,
                 star,
                 compoundPredicateBitKeys);
+        this.segmentHeader = toHeader();
     }
 
     /**
@@ -197,7 +199,7 @@ public class Segment {
             buf.append(sep);
             buf.append("excluded={");
             int k = 0;
-            for (Region excludedRegion : excludedRegions) {
+            for (ExcludedRegion excludedRegion : excludedRegions) {
                 if (k++ > 0) {
                     buf.append(", ");
                 }
@@ -244,7 +246,7 @@ public class Segment {
         final int n = excludedRegions.size();
         //noinspection ForLoopReplaceableByForEach
         for (int i = 0; i < n; i++) {
-            Region excludedRegion = excludedRegions.get(i);
+            ExcludedRegion excludedRegion = excludedRegions.get(i);
             if (excludedRegion.wouldContain(keys)) {
                 return true;
             }
@@ -265,7 +267,7 @@ public class Segment {
         pw.println();
     }
 
-    public List<Region> getExcludedRegions() {
+    public List<ExcludedRegion> getExcludedRegions() {
         return excludedRegions;
     }
 
@@ -314,121 +316,87 @@ public class Segment {
 
     /**
      * Definition of a region of values which are not in a segment.
-     *
-     * <p>A region is defined by a set of constraints, one for each column
-     * in the segment. A constraint may be
-     * {@link mondrian.rolap.agg.LiteralStarPredicate}(true), meaning that
-     * the column is unconstrained.
-     *
-     * <p>For example,
-     * <pre>
-     * segment (State={CA, OR, WA}, Gender=*)
-     * actual values {1997, 1998} * {CA, OR, WA} * {M, F} = 12 cells
-     * excluded region (Year=*, State={CA, OR}, Gender={F})
-     * excluded values {1997, 1998} * {CA, OR} * {F} = 4 cells
-     *
-     * Values:
-     *
-     *     F     M
-     * CA  out   in
-     * OR  out   in
-     * WA  in    in
-     * </pre>
-     *
-     * <p>Note that the resulting segment is not a hypercube: it has a 'hole'.
-     * This is why regions are required.
      */
-    static class Region {
-        private final StarColumnPredicate[] predicates;
-        private final StarPredicate[] multiColumnPredicates;
-        protected final int cellCount;
-
-        Region(
-            List<StarColumnPredicate> predicateList,
-            List<StarPredicate> multiColumnPredicateList,
-            int cellCount)
-        {
-            this.predicates =
-                predicateList.toArray(
-                    new StarColumnPredicate[predicateList.size()]);
-            this.multiColumnPredicates =
-                multiColumnPredicateList.toArray(
-                    new StarPredicate[multiColumnPredicateList.size()]);
-            this.cellCount = cellCount;
-        }
-
-        public List<StarColumnPredicate> getPredicates() {
-            return Collections.unmodifiableList(Arrays.asList(predicates));
-        }
-
-        public List<StarPredicate> getMultiColumnPredicates() {
-            return Collections.unmodifiableList(
-                Arrays.asList(multiColumnPredicates));
-        }
-
-        public int getCellCount() {
-            return cellCount;
-        }
-
-        public boolean wouldContain(Object[] keys) {
-            assert keys.length == predicates.length;
-            for (int i = 0; i < keys.length; i++) {
-                final Object key = keys[i];
-                final StarColumnPredicate predicate = predicates[i];
-                if (!predicate.evaluate(key)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        public boolean equals(Object obj) {
-            if (obj instanceof Region) {
-                Region that = (Region) obj;
-                return Arrays.equals(
-                    this.predicates, that.predicates)
-                    && Arrays.equals(
-                        this.multiColumnPredicates,
-                        that.multiColumnPredicates);
-            } else {
-                return false;
-            }
-        }
-
-        public int hashCode() {
-            return Arrays.hashCode(multiColumnPredicates) ^
-                Arrays.hashCode(predicates);
-        }
-
+    public static interface ExcludedRegion {
         /**
-         * Describes this Segment.
-         * @param buf Buffer to write to.
+         * Tells whether this exclusion region would contain
+         * the cell corresponding to the keys.
          */
-        public void describe(StringBuilder buf) {
-            int k = 0;
-            for (StarColumnPredicate predicate : predicates) {
-                if (predicate instanceof LiteralStarPredicate
-                    && ((LiteralStarPredicate) predicate).getValue())
-                {
-                    continue;
-                }
-                if (k++ > 0) {
-                    buf.append(" AND ");
-                }
-                predicate.describe(buf);
-            }
-            for (StarPredicate predicate : multiColumnPredicates) {
-                if (predicate instanceof LiteralStarPredicate
-                    && ((LiteralStarPredicate) predicate).getValue())
-                {
-                    continue;
-                }
-                if (k++ > 0) {
-                    buf.append(" AND ");
-                }
-                predicate.describe(buf);
-            }
+        public boolean wouldContain(Object[] keys);
+        /**
+         * Returns the arrity of this region.
+         */
+        public int getArrity();
+        /**
+         * Describes this exclusion region in a human readable way.
+         */
+        public void describe(StringBuilder buf);
+        /**
+         * Returns an approximation of the number of cells exceluded
+         * in this region.
+         */
+        public int getCellCount();
+    }
+
+    /**
+     * Creates a SegmentHeader object describing the supplied
+     * Segment object.
+     *
+     * @param segment A segment object for which we want to generate
+     * a SegmentHeader.
+     * @return A SegmentHeader describing the supplied Segment object.
+     */
+    private SegmentHeader toHeader() {
+        final List<ConstrainedColumn> cc =
+            new ArrayList<ConstrainedColumn>();
+        final List<String> cp = new ArrayList<String>();
+        for (StarColumnPredicate predicate : this.predicates) {
+            cc.add(toConstrainedColumn(predicate));
         }
+        StringBuilder buf = new StringBuilder();
+        for (StarPredicate compoundPredicate : compoundPredicateList) {
+            buf.setLength(0);
+            SqlQuery query =
+                new SqlQuery(
+                    getStar().getSqlQueryDialect());
+            compoundPredicate.toSql(query, buf);
+            cp.add(buf.toString());
+        }
+        final RolapSchema schema = star.getSchema();
+        return new SegmentHeader(
+            schema.getName(),
+            schema.getChecksum(),
+            measure.getCubeName(),
+            measure.getName(),
+            cc.toArray(new ConstrainedColumn[cc.size()]),
+            cp.toArray(new String[cp.size()]),
+            star.getFactTable().getAlias(),
+            getConstrainedColumnsBitKey());
+    }
+
+    private static ConstrainedColumn toConstrainedColumn(
+        StarColumnPredicate predicate)
+    {
+        if (predicate instanceof LiteralStarPredicate
+            && predicate.evaluate(Collections.emptyList()))
+        {
+            // Column is not constrained, i.e. wildcard.
+            return new ConstrainedColumn(
+                predicate.getConstrainedColumn()
+                    .getExpression().getGenericExpression(),
+                null);
+        }
+
+        final List<Object> values = new ArrayList<Object>();
+        predicate.values(values);
+        return new ConstrainedColumn(
+            predicate.getConstrainedColumn()
+                .getExpression().getGenericExpression(),
+            values.toArray());
+    }
+
+    public SegmentHeader getHeader() {
+        return this.segmentHeader;
     }
 }
 

@@ -9,8 +9,15 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.CacheControl;
+import mondrian.olap.Cube;
 import mondrian.olap.MondrianProperties;
+import mondrian.olap.MondrianServer;
+import mondrian.spi.SegmentCache;
 import mondrian.test.BasicQueryTest;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Test suite that runs the {@link BasicQueryTest} but with the
@@ -20,22 +27,27 @@ import mondrian.test.BasicQueryTest;
  * @version $Id$
  */
 public class SegmentCacheTest extends BasicQueryTest {
+    private SegmentCache mockCache;
+    private SegmentCacheWorker testWorker;
     @Override
     protected void setUp() throws Exception {
         super.setUp();
         propSaver.set(
             MondrianProperties.instance().DisableCaching,
             true);
+        this.mockCache = new MockSegmentCache();
+        this.testWorker = new SegmentCacheWorker(mockCache);
+        MondrianServer.forConnection(getTestContext().getConnection())
+            .getAggregationManager().segmentCacheWorkers.add(testWorker);
         getTestContext().getConnection().getCacheControl(null)
             .flushSchemaCache();
-        propSaver.set(
-            MondrianProperties.instance().SegmentCache,
-            MockSegmentCache.class.getName());
     }
 
     @Override
     protected void tearDown() throws Exception {
         propSaver.reset();
+        MondrianServer.forConnection(getTestContext().getConnection())
+            .getAggregationManager().segmentCacheWorkers.remove(testWorker);
         getTestContext().getConnection().getCacheControl(null)
             .flushSchemaCache();
         super.tearDown();
@@ -66,6 +78,66 @@ public class SegmentCacheTest extends BasicQueryTest {
             + "Row #0: 2,716\n";
         assertQueryReturns(query, result);
         assertQueryReturns(query2, result2);
+    }
+
+    public void testSegmentCacheEvents() throws Exception {
+        final List<SegmentHeader> createdHeaders =
+            new ArrayList<SegmentHeader>();
+        final List<SegmentHeader> deletedHeaders =
+            new ArrayList<SegmentHeader>();
+        final SegmentCache.SegmentCacheListener listener =
+            new SegmentCache.SegmentCacheListener() {
+                public void handle(SegmentCacheEvent e) {
+                    switch (e.getEventType()) {
+                    case ENTRY_CREATED:
+                        createdHeaders.add(e.getSource());
+                        break;
+                    case ENTRY_DELETED:
+                        deletedHeaders.add(e.getSource());
+                        break;
+                    default:
+                        throw new UnsupportedOperationException();
+                    }
+                }
+            };
+
+        try {
+            // Register our custom listener.
+            mockCache.addListener(listener);
+            // Now execute a query and check the events
+            executeQuery(
+                "select {[Measures].[Unit Sales]} on columns from [Sales]");
+            assertEquals(1, createdHeaders.size());
+            assertEquals(0, deletedHeaders.size());
+            assertEquals("Sales", createdHeaders.get(0).cubeName);
+            assertEquals("FoodMart", createdHeaders.get(0).schemaName);
+            assertEquals("Unit Sales", createdHeaders.get(0).measureName);
+            createdHeaders.clear();
+            deletedHeaders.clear();
+
+            // Now flush the segment and check the events.
+            final CacheControl cc =
+                getTestContext().getConnection().getCacheControl(null);
+            Cube salesCube = null;
+            for (Cube cube
+                : getConnection().getSchemaReader().withLocus().getCubes())
+            {
+                if (cube.getName().equals("Sales")) {
+                    salesCube = cube;
+                    break;
+                }
+            }
+            cc.flush(
+                cc.createMeasuresRegion(salesCube));
+
+            assertEquals(0, createdHeaders.size());
+            assertEquals(1, deletedHeaders.size());
+            assertEquals("Sales", deletedHeaders.get(0).cubeName);
+            assertEquals("FoodMart", deletedHeaders.get(0).schemaName);
+            assertEquals("Unit Sales", deletedHeaders.get(0).measureName);
+        } finally {
+            mockCache.removeListener(listener);
+        }
     }
 }
 

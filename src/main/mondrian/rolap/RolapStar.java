@@ -30,6 +30,7 @@ import java.lang.ref.SoftReference;
 import java.sql.Connection;
 import java.sql.*;
 import java.util.*;
+
 import javax.sql.DataSource;
 
 /**
@@ -166,6 +167,63 @@ public class RolapStar {
         }
         // No segment contains the requested cell.
         return null;
+    }
+
+    public Object getCellFromAllCaches(final CellRequest request) {
+        // First, try the local/thread cache.
+        Object result = getCellFromCache(request, null);
+        if (result != null) {
+            return result;
+        }
+        // Now ask the segment cache manager.
+        final AggregationKey aggregationKey = new AggregationKey(request);
+        return getAggregationManager().cacheMgr.execute(
+            new SegmentCacheManager.Command<Object>() {
+                public Object call() throws Exception {
+                    final List<SegmentHeader> headers =
+                        getAggregationManager().cacheMgr
+                            .segmentIndex.locate(
+                                schema.getName(),
+                                schema.getChecksum(),
+                                request.getMeasure().cubeName,
+                                request.getMeasure().getName(),
+                                request.getMeasure().getStar()
+                                    .getFactTable().getAlias(),
+                                request.getConstrainedColumnsBitKey(),
+                                request.getMappedCellValues(),
+                                AggregationKey.getCompoundPredicateArray(
+                                    RolapStar.this,
+                                    aggregationKey
+                                        .getCompoundPredicateList()));
+                    if (headers.size() == 0) {
+                        return null;
+                    }
+                    SegmentBody sb = null;
+                    workerLoop:
+                    for (SegmentCacheWorker worker
+                        : getAggregationManager().segmentCacheWorkers)
+                    {
+                        for (SegmentHeader header : headers) {
+                            if (worker.contains(header)) {
+                                sb = worker.get(header);
+                                break workerLoop;
+                            }
+                        }
+                    }
+                    if (sb == null) {
+                        return null;
+                    }
+                    final Segment emptySegment =
+                        headers.get(0).toSegment(
+                            RolapStar.this,
+                            request.getConstrainedColumnsBitKey(),
+                            request.getConstrainedColumns(),
+                            request.getMeasure());
+                    final SegmentWithData segment =
+                        SegmentHeader.addData(emptySegment, sb);
+                    return segment.getCellValue(request.getSingleValues());
+                }
+            });
     }
 
     public void register(SegmentWithData segment) {
@@ -552,7 +610,6 @@ public class RolapStar {
                 getAggregationManager(),
                 aggregationKey);
 
-        if (false)
         localBars.get().aggregations.put(aggregationKey, aggregation);
 
         // Let the change listener get the opportunity to register the
@@ -785,29 +842,6 @@ public class RolapStar {
             for (AggStar aggStar : getAggStars()) {
                 aggStar.print(pw, subprefix);
             }
-        }
-    }
-
-    /**
-     * Flushes the contents of a given region of cells from this star.
-     *
-     * @param cacheControl Cache control API
-     * @param region Predicate defining a region of cells
-     */
-    public void flush(
-        CacheControl cacheControl,
-        CacheControl.CellRegion region)
-    {
-        // Translate the region into a set of (column, value) constraints.
-        final RolapCacheRegion cacheRegion =
-            RolapAggregationManager.makeCacheRegion(this, region);
-
-        // Flush the external cache regions
-        for (SegmentCacheWorker segmentCacheWorker
-            : getAggregationManager().segmentCacheWorkers)
-        {
-            segmentCacheWorker.flush(
-                SegmentHeader.forCacheRegion(cacheRegion));
         }
     }
 

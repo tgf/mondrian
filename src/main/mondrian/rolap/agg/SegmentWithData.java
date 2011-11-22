@@ -95,7 +95,7 @@ public class SegmentWithData extends Segment {
         RolapStar.Column[] columns,
         RolapStar.Measure measure,
         StarColumnPredicate[] predicates,
-        List<Region> excludedRegions,
+        List<ExcludedRegion> excludedRegions,
         final List<StarPredicate> compoundPredicateList,
         SegmentDataset data,
         SegmentAxis[] axes)
@@ -217,8 +217,8 @@ public class SegmentWithData extends Segment {
         for (SegmentAxis axis : axes) {
             cellCount *= axis.getKeys().length;
         }
-        for (Region excludedRegion : excludedRegions) {
-            cellCount -= excludedRegion.cellCount;
+        for (ExcludedRegion excludedRegion : excludedRegions) {
+            cellCount -= excludedRegion.getCellCount();
         }
         return cellCount;
     }
@@ -241,7 +241,7 @@ public class SegmentWithData extends Segment {
         BitSet[] axisKeepBitSets,
         int bestColumn,
         StarColumnPredicate bestPredicate,
-        List<SegmentWithData.Region> excludedRegions)
+        List<ExcludedRegion> excludedRegions)
     {
         assert axisKeepBitSets.length == axes.length;
 
