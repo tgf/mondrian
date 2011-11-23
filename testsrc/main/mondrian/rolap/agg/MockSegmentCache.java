@@ -11,6 +11,7 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.spi.SegmentCache;
+import mondrian.util.CompletedFuture;
 
 import java.io.*;
 import java.util.*;
@@ -35,31 +36,14 @@ public class MockSegmentCache implements SegmentCache {
 
     private final static int maxElements = 100;
 
-    /**
-     * Executor for the tests. Thread-factory ensures that thread does not
-     * prevent shutdown.
-     */
-    private static final ExecutorService executor =
-        Util.getExecutorService(
-            1,
-            "mondrian.rolap.agg.MockSegmentCache$ExecutorThread");
-
     public Future<Boolean> contains(final SegmentHeader header) {
-        return executor.submit(
-            new Callable<Boolean>() {
-                public Boolean call() throws Exception {
-                    return cache.containsKey(header);
-                }
-            });
+        return new CompletedFuture<Boolean>(
+            cache.containsKey(header), null);
     }
 
     public Future<SegmentBody> get(final SegmentHeader header) {
-        return executor.submit(
-            new Callable<SegmentBody>() {
-                public SegmentBody call() throws Exception {
-                    return cache.get(header);
-                }
-            });
+        return new CompletedFuture<SegmentBody>(
+            cache.get(header), null);
     }
 
     public Future<Boolean> put(
@@ -102,86 +86,72 @@ public class MockSegmentCache implements SegmentCache {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return executor.submit(
-            new Callable<Boolean>() {
-                public Boolean call() throws Exception {
-                    cache.put(header, body);
-                    fireSegmentCacheEvent(
-                        new SegmentCache.SegmentCacheListener
-                            .SegmentCacheEvent()
-                        {
-                            public boolean isLocal() {
-                                return true;
-                            }
-                            public SegmentHeader getSource() {
-                                return header;
-                            }
-                            public EventType getEventType() {
-                                return
-                                    SegmentCacheListener.SegmentCacheEvent
-                                        .EventType.ENTRY_CREATED;
-                            }
-                        });
-                    if (cache.size() > maxElements) {
-                        // Cache is full. pop one out at random.
-                        final double index =
-                            Math.floor(maxElements * Math.random());
-                        cache.remove(index);
-                        fireSegmentCacheEvent(
-                            new SegmentCache.SegmentCacheListener
-                                .SegmentCacheEvent()
-                            {
-                                public boolean isLocal() {
-                                    return true;
-                                }
-                                public SegmentHeader getSource() {
-                                    return header;
-                                }
-                                public EventType getEventType() {
-                                    return
-                                        SegmentCacheListener.SegmentCacheEvent
-                                            .EventType.ENTRY_DELETED;
-                                }
-                            });
-                    }
+        cache.put(header, body);
+        fireSegmentCacheEvent(
+            new SegmentCache.SegmentCacheListener
+                .SegmentCacheEvent()
+            {
+                public boolean isLocal() {
                     return true;
                 }
+                public SegmentHeader getSource() {
+                    return header;
+                }
+                public EventType getEventType() {
+                    return
+                        SegmentCacheListener.SegmentCacheEvent
+                            .EventType.ENTRY_CREATED;
+                }
             });
+        if (cache.size() > maxElements) {
+            // Cache is full. pop one out at random.
+            final double index =
+                Math.floor(maxElements * Math.random());
+            cache.remove(index);
+            fireSegmentCacheEvent(
+                new SegmentCache.SegmentCacheListener
+                    .SegmentCacheEvent()
+                {
+                    public boolean isLocal() {
+                        return true;
+                    }
+                    public SegmentHeader getSource() {
+                        return header;
+                    }
+                    public EventType getEventType() {
+                        return
+                            SegmentCacheListener.SegmentCacheEvent
+                                .EventType.ENTRY_DELETED;
+                    }
+                });
+        }
+        return new CompletedFuture<Boolean>(true, null);
     }
 
     public Future<List<SegmentHeader>> getSegmentHeaders() {
-        return executor.submit(
-            new Callable<List<SegmentHeader>>() {
-                public List<SegmentHeader> call() throws Exception {
-                    return new ArrayList<SegmentHeader>(cache.keySet());
-                }
-            });
+        return new CompletedFuture<List<SegmentHeader>>(
+            new ArrayList<SegmentHeader>(cache.keySet()), null);
     }
 
     public Future<Boolean> remove(final SegmentHeader header) {
-        return executor.submit(
-            new Callable<Boolean>() {
-                public Boolean call() throws Exception {
-                    cache.remove(header);
-                    fireSegmentCacheEvent(
-                        new SegmentCache.SegmentCacheListener
-                            .SegmentCacheEvent()
-                        {
-                            public boolean isLocal() {
-                                return true;
-                            }
-                            public SegmentHeader getSource() {
-                                return header;
-                            }
-                            public EventType getEventType() {
-                                return
-                                    SegmentCacheListener.SegmentCacheEvent
-                                        .EventType.ENTRY_DELETED;
-                            }
-                        });
+        cache.remove(header);
+        fireSegmentCacheEvent(
+            new SegmentCache.SegmentCacheListener
+                .SegmentCacheEvent()
+            {
+                public boolean isLocal() {
                     return true;
                 }
+                public SegmentHeader getSource() {
+                    return header;
+                }
+                public EventType getEventType() {
+                    return
+                        SegmentCacheListener.SegmentCacheEvent
+                            .EventType.ENTRY_DELETED;
+                }
             });
+        return new CompletedFuture<Boolean>(true, null);
     }
 
     public void tearDown() {

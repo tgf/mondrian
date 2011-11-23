@@ -159,8 +159,7 @@ public class AggregationManager extends RolapAggregationManager {
     {
         return new CacheControlImpl(connection) {
             protected void flushNonUnion(final CellRegion region) {
-              cacheMgr.execute(
-                  new FlushCommand(region, this));
+              cacheMgr.flush(AggregationManager.this, this, region);
             }
 
             public void flush(final CellRegion region) {
@@ -185,111 +184,7 @@ public class AggregationManager extends RolapAggregationManager {
         };
     }
 
-    private final class FlushCommand implements Command<Void> {
-        private final CellRegion region;
-        private final CacheControlImpl cacheControlImpl;
-        public FlushCommand(
-            final CellRegion region,
-            final CacheControlImpl cacheControlImpl)
-        {
-            this.region = region;
-            this.cacheControlImpl = cacheControlImpl;
-        }
-        public Void call() throws Exception {
-            /*
-             * For each measure and each star, ask the index
-             * which headers intersect.
-             */
-            final List<SegmentHeader> headers =
-                new ArrayList<SegmentHeader>();
-            final List<Member> measures =
-                CacheControlImpl.findMeasures(region);
-            final ConstrainedColumn[] flushRegion =
-                CacheControlImpl.findAxisValues(region);
-
-            for (Member member : measures) {
-                if (!(member instanceof RolapStoredMeasure)) {
-                    continue;
-                }
-                RolapStoredMeasure storedMeasure =
-                    (RolapStoredMeasure) member;
-                headers.addAll(
-                    cacheMgr.segmentIndex.intersectRegion(
-                        member.getDimension().getSchema().getName(),
-                        ((RolapSchema)member.getDimension()
-                            .getSchema()).getChecksum(),
-                        storedMeasure.getCube().getName(),
-                        storedMeasure.getName(),
-                        storedMeasure.getCube().getStar()
-                            .getFactTable().getAlias(),
-                        flushRegion));
-            }
-
-            // If flushregion is empty, this means we must clear all
-            // segments for the region's measures.
-            if (flushRegion.length == 0) {
-                for (SegmentHeader header : headers) {
-                    for (SegmentCacheWorker worker
-                        : AggregationManager.this.segmentCacheWorkers)
-                    {
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                        cacheMgr.segmentIndex.remove(header);
-                    }
-                }
-                return null;
-            }
-
-            // Now we know which headers intersect. For each of them,
-            // we append an excluded region.
-            // TODO optimize the logic here. If a segment is mostly
-            // empty, we should thrash it completely.
-            for (SegmentHeader header : headers) {
-                if (!header.canConstrain(flushRegion)) {
-                    // We have to delete that segment altogether.
-                    cacheControlImpl.trace(
-                        "discard segment - it cannot be constrained and maintain consistency: "
-                        + header.getDescription());
-                    for (SegmentCacheWorker worker
-                        : AggregationManager.this.segmentCacheWorkers)
-                    {
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                    }
-                    cacheMgr.segmentIndex.remove(header);
-                    continue;
-                }
-                final SegmentHeader newHeader =
-                    header.constrain(flushRegion);
-                for (SegmentCacheWorker worker
-                    : AggregationManager.this.segmentCacheWorkers)
-                {
-                    if (worker.supportsRichIndex()) {
-                        final SegmentBody sb = worker.get(header);
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                        if (sb != null) {
-                            worker.put(newHeader, sb);
-                        }
-                    } else {
-                        // The cache doesn't support rich index. We have
-                        // to clear the segment entirely.
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                    }
-                }
-                cacheMgr.segmentIndex.remove(header);
-                cacheMgr.segmentIndex.add(newHeader);
-            }
-
-            // Done
-            return null;
-        }
-    }
+    
 
     public Object getCellFromCache(CellRequest request) {
         return getCellFromCache(request, null);

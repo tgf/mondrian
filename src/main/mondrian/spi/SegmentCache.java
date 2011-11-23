@@ -13,7 +13,6 @@ package mondrian.spi;
 import mondrian.olap.MondrianProperties;
 import mondrian.rolap.agg.SegmentBody;
 import mondrian.rolap.agg.SegmentHeader;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.spi.SegmentCache.SegmentCacheListener.SegmentCacheEvent;
 
 import java.util.List;
@@ -127,6 +126,11 @@ public interface SegmentCache {
      * to the state of the cache and be notified of changes to its
      * state or its entries. Mondrian will automatically register
      * a listener with the implementations it uses.
+     *
+     * Implementations of SegmentCache should only send events if the
+     * cause of the event is not Mondrian itself. Only in cases where
+     * the cache gets updated by other Mondrian nodes or by a third
+     * party application is it required to use this interface.
      */
     interface SegmentCacheListener {
         /**

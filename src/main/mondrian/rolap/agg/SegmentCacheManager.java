@@ -9,8 +9,12 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.CacheControl;
+import mondrian.olap.Member;
 import mondrian.olap.Util;
+import mondrian.olap.CacheControl.CellRegion;
 import mondrian.rolap.*;
+import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.rolap.cache.SegmentCacheIndex;
 import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.util.Pair;
@@ -289,7 +293,7 @@ public class SegmentCacheManager {
     }
 
     /**
-     * Adds segment to segment index and cache.
+     * Adds a segment to segment index and cache.
      *
      * <p>Called when a SQL statement has finished loading a segment.</p>
      *
@@ -305,6 +309,33 @@ public class SegmentCacheManager {
         ACTOR.event(
             handler,
             new SegmentAddEvent(aggMgr, header, body));
+    }
+
+    /**
+     * Removes a segment to segment index and cache.
+     *
+     * @param aggMgr Aggregate manager
+     * @param header segment header
+     * @param body segment body
+     */
+    public void remove(
+        AggregationManager aggMgr,
+        SegmentHeader header)
+    {
+        ACTOR.event(
+            handler,
+            new SegmentRemoveEvent(aggMgr, header));
+    }
+
+    public void flush(
+        AggregationManager aggMan,
+        CacheControl cacheControl,
+        CacheControl.CellRegion region)
+    {
+        execute(new FlushCommand(
+            aggMan,
+            region,
+            (CacheControlImpl)cacheControl));
     }
 
     /**
@@ -339,6 +370,7 @@ public class SegmentCacheManager {
         void visit(SegmentLoadSucceededEvent event);
         void visit(SegmentLoadFailedEvent event);
         void visit(SegmentAddEvent event);
+        void visit(SegmentRemoveEvent event);
         void visit(ExternalSegmentCreatedEvent event);
         void visit(ExternalSegmentDeletedEvent event);
     }
@@ -382,6 +414,17 @@ public class SegmentCacheManager {
             }
         }
 
+        public void visit(SegmentRemoveEvent event) {
+            event.aggMgr.cacheMgr.segmentIndex.remove(event.header);
+            for (SegmentCacheWorker segmentCacheWorker
+                : event.aggMgr.segmentCacheWorkers)
+            {
+                if (segmentCacheWorker.contains(event.header)) {
+                    segmentCacheWorker.remove(event.header);
+                }
+            }
+        }
+
         public void visit(ExternalSegmentCreatedEvent event) {
             event.aggMgr.cacheMgr.segmentIndex.add(event.header);
         }
@@ -406,6 +449,101 @@ public class SegmentCacheManager {
     }
 
     public static interface Command<T> extends Message, Callable<T> {
+    }
+
+    private final class FlushCommand implements Command<Void> {
+        private final CellRegion region;
+        private final CacheControlImpl cacheControlImpl;
+        private final AggregationManager aggMan;
+        public FlushCommand(
+            AggregationManager aggMan,
+            CellRegion region,
+            CacheControlImpl cacheControlImpl)
+        {
+            this.aggMan = aggMan;
+            this.region = region;
+            this.cacheControlImpl = cacheControlImpl;
+        }
+        public Void call() throws Exception {
+            /*
+             * For each measure and each star, ask the index
+             * which headers intersect.
+             */
+            final List<SegmentHeader> headers =
+                new ArrayList<SegmentHeader>();
+            final List<Member> measures =
+                CacheControlImpl.findMeasures(region);
+            final ConstrainedColumn[] flushRegion =
+                CacheControlImpl.findAxisValues(region);
+
+            for (Member member : measures) {
+                if (!(member instanceof RolapStoredMeasure)) {
+                    continue;
+                }
+                RolapStoredMeasure storedMeasure =
+                    (RolapStoredMeasure) member;
+                headers.addAll(
+                    segmentIndex.intersectRegion(
+                        member.getDimension().getSchema().getName(),
+                        ((RolapSchema)member.getDimension()
+                            .getSchema()).getChecksum(),
+                        storedMeasure.getCube().getName(),
+                        storedMeasure.getName(),
+                        storedMeasure.getCube().getStar()
+                            .getFactTable().getAlias(),
+                        flushRegion));
+            }
+
+            // If flushregion is empty, this means we must clear all
+            // segments for the region's measures.
+            if (flushRegion.length == 0) {
+                for (SegmentHeader header : headers) {
+                    remove(aggMan, header);
+                }
+                return null;
+            }
+
+            // Now we know which headers intersect. For each of them,
+            // we append an excluded region.
+            // TODO optimize the logic here. If a segment is mostly
+            // empty, we should thrash it completely.
+            for (SegmentHeader header : headers) {
+                if (!header.canConstrain(flushRegion)) {
+                    // We have to delete that segment altogether.
+                    cacheControlImpl.trace(
+                        "discard segment - it cannot be constrained and maintain consistency: "
+                        + header.getDescription());
+                    remove(aggMan, header);
+                    continue;
+                }
+                final SegmentHeader newHeader =
+                    header.constrain(flushRegion);
+                for (SegmentCacheWorker worker
+                    : aggMan.segmentCacheWorkers)
+                {
+                    if (worker.supportsRichIndex()) {
+                        final SegmentBody sb = worker.get(header);
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                        if (sb != null) {
+                            worker.put(newHeader, sb);
+                        }
+                    } else {
+                        // The cache doesn't support rich index. We have
+                        // to clear the segment entirely.
+                        if (worker.contains(header)) {
+                            worker.remove(header);
+                        }
+                    }
+                }
+                segmentIndex.remove(header);
+                segmentIndex.add(newHeader);
+            }
+
+            // Done
+            return null;
+        }
     }
 
     private static class ShutdownCommand implements Command<String> {
@@ -519,9 +657,9 @@ public class SegmentCacheManager {
         private final BlockingQueue<Pair<Handler, Message>> eventQueue =
             new ArrayBlockingQueue<Pair<Handler, Message>>(1000);
 
-        private final ResponseQueue<Command, Pair<Object, Throwable>>
+        private final ResponseQueue<Command<?>, Pair<Object, Throwable>>
             responseQueue =
-            new ResponseQueue<Command, Pair<Object, Throwable>>(1000);
+            new ResponseQueue<Command<?>, Pair<Object, Throwable>>(1000);
 
         public void run() {
             thread = Thread.currentThread();
@@ -534,8 +672,8 @@ public class SegmentCacheManager {
                         // A message is either a command or an event.
                         // A command returns a value that must be read by
                         // the caller.
-                        if (message instanceof Command) {
-                            Command command = (Command) message;
+                        if (message instanceof Command<?>) {
+                            Command<?> command = (Command<?>) message;
                             try {
                                 Object result = command.call();
                                 responseQueue.put(
@@ -663,6 +801,25 @@ public class SegmentCacheManager {
             this.aggMgr = aggMgr;
             this.header = header;
             this.body = body; // may be null
+        }
+
+        public void acceptWithoutResponse(Visitor visitor) {
+            visitor.visit(this);
+        }
+    }
+
+    private static class SegmentRemoveEvent extends Event {
+        private final AggregationManager aggMgr;
+        private final SegmentHeader header;
+
+        public SegmentRemoveEvent(
+            AggregationManager aggMgr,
+            SegmentHeader header)
+        {
+            assert header != null;
+            assert aggMgr != null;
+            this.aggMgr = aggMgr;
+            this.header = header;
         }
 
         public void acceptWithoutResponse(Visitor visitor) {

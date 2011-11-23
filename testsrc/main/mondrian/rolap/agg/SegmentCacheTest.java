@@ -107,6 +107,8 @@ public class SegmentCacheTest extends BasicQueryTest {
             // Now execute a query and check the events
             executeQuery(
                 "select {[Measures].[Unit Sales]} on columns from [Sales]");
+            // Wait for propagation.
+            Thread.sleep(2000);
             assertEquals(1, createdHeaders.size());
             assertEquals(0, deletedHeaders.size());
             assertEquals("Sales", createdHeaders.get(0).cubeName);
@@ -130,6 +132,8 @@ public class SegmentCacheTest extends BasicQueryTest {
             cc.flush(
                 cc.createMeasuresRegion(salesCube));
 
+            // Wait for propagation.
+            Thread.sleep(2000);
             assertEquals(0, createdHeaders.size());
             assertEquals(1, deletedHeaders.size());
             assertEquals("Sales", deletedHeaders.get(0).cubeName);
