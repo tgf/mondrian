@@ -59,18 +59,8 @@ public class AggregationManager extends RolapAggregationManager {
     // TODO: create using factory and/or configuration parameters. Executor
     //   should be shared within MondrianServer or target JDBC database.
     public final Executor sqlExecutor =
-        new ThreadPoolExecutor(
-            3, 10, 1, TimeUnit.SECONDS,
-            new ArrayBlockingQueue<Runnable>(10),
-            new ThreadFactory() {
-                public Thread newThread(Runnable r) {
-                    final Thread t =
-                        Executors.defaultThreadFactory().newThread(r);
-                    t.setDaemon(true);
-                    t.setName("mondrian.rolap.agg.AggregationManager$sqlExecutor");
-                    return t;
-                }
-            });
+        Util.getExecutorService(
+            10, 3, 1, 10, "mondrian.rolap.agg.AggregationManager$sqlExecutor");
 
     /**
      * Returns or creates the singleton.

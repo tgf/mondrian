@@ -222,21 +222,50 @@ public class Util extends XOMUtil {
      * @return An executor service preconfigured.
      */
     public static ExecutorService getExecutorService(
-        final int maxNbThreads,
+        final int maxNbThreads, 
+        String name)
+    {
+        return getExecutorService(maxNbThreads, 0, 1, -1, name);
+    }
+
+    /**
+     * Creates an {@link ExecutorService} object backed by a thread pool
+     * with a fixed number of threads..
+     * @param maxNbThreads Maximum number of concurrent
+     * threads.
+     * @param minNbThreads Minimum number of concurrent
+     * threads to maintain in the pool, even if they are
+     * idle.
+     * @param keepAliveTime Time, in seconds, for which to
+     * keep alive unused threads.
+     * @param queueLength Maximum number of tasks that can be
+     * put in the queue of tasks to be executed. <code>-1</code>
+     * means no limit.
+     * @param name The name of the threads.
+     * @return An executor service preconfigured.
+     */
+    public static ExecutorService getExecutorService(
+        int maxNbThreads,
+        int minNbThreads,
+        long keepAliveTime,
+        int queueLength,
         final String name)
     {
-        return Executors.newFixedThreadPool(
-            maxNbThreads,
+        return new ThreadPoolExecutor(
+            minNbThreads, maxNbThreads,
+            keepAliveTime, TimeUnit.SECONDS,
+            queueLength < 0
+                ? new LinkedBlockingQueue<Runnable>()
+                : new ArrayBlockingQueue<Runnable>(queueLength),
             new ThreadFactory() {
                 public Thread newThread(Runnable r) {
-                    final Thread thread =
+                    final Thread t =
                         Executors.defaultThreadFactory().newThread(r);
-                    thread.setDaemon(true);
-                    thread.setName(name);
-                    return thread;
+                    t.setDaemon(true);
+                    t.setName(name);
+                    return t;
                 }
-            }
-        );
+            });
     }
 
     /**
