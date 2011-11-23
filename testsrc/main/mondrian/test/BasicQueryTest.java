@@ -7363,6 +7363,9 @@ public class BasicQueryTest extends FoodMartTestCase {
         final OlapConnection olapConnection =
             TestContext.instance().getOlap4jConnection();
 
+        final String mdxQuery =
+            "select {TopCount([Customers].Members, 10, [Measures].[Unit Sales])} on columns from [Sales]";
+
         final ExecutorService es =
             Executors.newCachedThreadPool(
                 new ThreadFactory() {
@@ -7376,24 +7379,23 @@ public class BasicQueryTest extends FoodMartTestCase {
                     }
                 });
 
+
         final OlapStatement stmt = olapConnection.createStatement();
 
         es.submit(
             new Callable<CellSet>() {
                 public CellSet call() throws Exception {
-                    return stmt.executeOlapQuery(
-                        "select {Crossjoin([Store].Members, [Customers].Members)} on columns from [Sales]");
+                    return stmt.executeOlapQuery(mdxQuery);
                 }
             });
 
         // Give some time to the first query so it enters a "running" state.
-        Thread.sleep(1000);
+        Thread.sleep(100);
 
         es.submit(
             new Callable<CellSet>() {
                 public CellSet call() throws Exception {
-                    return stmt.executeOlapQuery(
-                        "select {Crossjoin([Store].Members, [Customers].Members)} on columns from [Sales]");
+                    return stmt.executeOlapQuery(mdxQuery);
                 }
             }).get();
 
