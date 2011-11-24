@@ -11,7 +11,6 @@ package mondrian.util;
 
 import mondrian.olap.Util;
 import mondrian.resource.MondrianResource;
-import mondrian.rolap.agg.SegmentHeader;
 
 import org.apache.log4j.Logger;
 

@@ -13,14 +13,10 @@
 package mondrian.rolap.agg;
 
 import mondrian.olap.CacheControl;
-import mondrian.olap.CacheControl.CellRegion;
-import mondrian.olap.Member;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.SqlStatement.Type;
-import mondrian.rolap.agg.SegmentCacheManager.Command;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
 import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.rolap.cache.*;
 import mondrian.server.Locus;
@@ -494,6 +490,12 @@ System.out.println(buf.toString());
 
     public PinSet createPinSet() {
         return new PinSetImpl();
+    }
+
+    public void shutdown() {
+        for (SegmentCacheWorker worker : segmentCacheWorkers) {
+            worker.shutdown();
+        }
     }
 
     /**

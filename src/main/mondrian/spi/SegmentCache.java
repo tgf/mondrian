@@ -12,7 +12,7 @@ package mondrian.spi;
 
 import mondrian.olap.MondrianProperties;
 import mondrian.rolap.agg.SegmentBody;
-import mondrian.rolap.agg.SegmentHeader;
+import mondrian.spi.SegmentHeader;
 import mondrian.spi.SegmentCache.SegmentCacheListener.SegmentCacheEvent;
 
 import java.util.List;
@@ -42,8 +42,8 @@ import java.util.concurrent.Future;
  * to maintain a consistent state.
  *
  * <p>Implementations must provide a default empty constructor.
- * Segment caches are instantiated as a singleton but can be
- * hot swapped by modifying {@link MondrianProperties#SegmentCache}.
+ * Mondrian creates one segment cache instance per Mondrian server.
+ * There could be more than one Mondrian server running in the same JVM.
  *
  * @see MondrianProperties#SegmentCache
  * @author LBoudreau

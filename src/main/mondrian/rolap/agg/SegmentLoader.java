@@ -13,7 +13,8 @@ import mondrian.olap.MondrianException;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.server.Locus;
 import mondrian.server.monitor.SqlStatementEvent;
 import mondrian.util.*;
@@ -48,14 +49,7 @@ public class SegmentLoader {
 
     private final static Logger LOGGER = Logger.getLogger(SegmentLoader.class);
 
-    private final static ExecutorService executor =
-        Util.getExecutorService(
-            MondrianProperties.instance().RollupAnalyzerNumberThreads.get(),
-            "mondrian.rolap.agg.SegmentLoader$ExecutorThread");
-
     private final AggregationManager aggMgr;
-    private final List<SegmentCacheWorker> segmentCacheWorkers;
-
 
     /**
      * Creates a SegmentLoader.
@@ -64,7 +58,6 @@ public class SegmentLoader {
      */
     public SegmentLoader(AggregationManager aggMgr) {
         this.aggMgr = aggMgr;
-        this.segmentCacheWorkers = aggMgr.segmentCacheWorkers;
     }
 
     /**
@@ -102,17 +95,6 @@ public class SegmentLoader {
         List<GroupingSet> groupingSets,
         List<StarPredicate> compoundPredicateList)
     {
-        // Now try to load the segments from a rollup
-        // operation of other segments.
-        if (false)
-        loadSegmentsFromCacheRollup(groupingSets, compoundPredicateList);
-
-        // Now check if there are segments left which were not
-        // loaded from the cache.
-        if (!anySegmentsLeft(groupingSets)) {
-            return Collections.emptyList();
-        }
-
         final Map<Segment, SlotFuture<SegmentWithData>> map =
             new IdentityHashMap<Segment, SlotFuture<SegmentWithData>>();
         final List<Future<SegmentWithData>> list =
@@ -258,205 +240,6 @@ public class SegmentLoader {
             if (stmt != null) {
                 stmt.close();
             }
-        }
-    }
-
-    private boolean anySegmentsLeft(List<GroupingSet> groupingSets) {
-        for (GroupingSet groupingSet : groupingSets) {
-            if (groupingSet.getSegments().size() > 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Tries to load segments by performing a rollup operation
-     * on pre-existing segments.
-     *
-     * @param groupingSets List of segments to lookup.
-     */
-    private void loadSegmentsFromCacheRollup(
-        List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList)
-    {
-        for (SegmentCacheWorker segmentCacheWorker : segmentCacheWorkers) {
-            final List<GroupingSet> gsToRemove = new ArrayList<GroupingSet>();
-            for (final GroupingSet groupingSet : groupingSets) {
-                final List<Segment> segmentsToRemove = new ArrayList<Segment>();
-                for (Segment segment : groupingSet.getSegments()) {
-                    if (loadSegmentFromCacheRollup(
-                            compoundPredicateList,
-                            segmentCacheWorker,
-                            segment, null))
-                    {
-                        // Remove this segment from the list of segments to
-                        // load.
-                        segmentsToRemove.add(segment);
-                    }
-                }
-                groupingSet.getSegments().removeAll(segmentsToRemove);
-                if (groupingSet.getSegments().size() == 0) {
-                    gsToRemove.add(groupingSet);
-                }
-            }
-            groupingSets.removeAll(gsToRemove);
-        }
-    }
-
-    /**
-     * Loads segments by rolling up existing segments.
-     */
-    private boolean loadSegmentFromCacheRollup(
-        List<StarPredicate> compoundPredicateList,
-        SegmentCacheWorker segmentCacheWorker,
-        final Segment segment,
-        HashMap<Segment, Pair<SegmentWithData, Throwable>> map)
-    {
-        final SegmentHeader headerRef = segment.getHeader();
-
-        // First step is to build a set of segments which have the
-        // same dimensionality as the segment we're trying to load.
-        final Set<SegmentHeader> matchingSegments =
-            new HashSet<SegmentHeader>();
-
-        final List<Callable<Boolean>> matchingTasks =
-            new ArrayList<Callable<Boolean>>();
-        for (final SegmentHeader header
-            : segmentCacheWorker.getSegmentHeaders())
-        {
-            matchingTasks.add(
-                new Callable<Boolean>() {
-                    public Boolean call() throws Exception {
-                        if (header.isSubset(segment)) {
-                            matchingSegments.add(header);
-                        }
-                        return true;
-                    }
-            });
-        }
-        if (Util.deprecated(false, false)) // very, very poor performance
-        Util.executeDistributedTasks(
-            matchingTasks,
-            executor,
-            false);
-
-        if (matchingSegments.size() == 0) {
-            // No rollup is possible as no matching aggregations
-            // were found.
-            return false;
-        }
-
-        // For each of the constrained column of the segment
-        // currently loaded, we will change its predicate to a
-        // wildcard and see if that matches segments from the
-        // caches.
-
-        // First get a list of all columns that we can turn
-        // into wildcards.
-        Set<ConstrainedColumn> columnsToTurnWildcard =
-            new LinkedHashSet<ConstrainedColumn>();
-        for (ConstrainedColumn cc
-            : headerRef.getConstrainedColumns())
-        {
-            if (cc.values.length > 1
-                || (cc.values.length == 1 && cc.values[0] != null))
-            {
-                columnsToTurnWildcard.add(cc);
-            }
-        }
-
-        if (columnsToTurnWildcard.size() == 0) {
-            // None of the columns can be turned into a wildcard.
-            // Cannot rollup this one.
-            return false;
-        }
-
-        if (columnsToTurnWildcard.size() > 8) {
-            // Trying to do this operation on segments that have
-            // more than 8 or so constrained columns that we can turn
-            // into wildcards is pointless as it would generate so many
-            // combinations that computing all of them would require
-            // more time than simply getting them from SQL.
-            return false;
-        }
-
-        // Now we create a list of all the possible combinations
-        // of columns being turned into wildcards and search if
-        // that matches a segment from the caches. We will analyze the
-        // combinations by distributing the load across threads.
-        List<Callable<SegmentHeader>> comboTasks =
-            new ArrayList<Callable<SegmentHeader>>();
-        for (final List<ConstrainedColumn> combo
-            : CombiningGenerator.of(columnsToTurnWildcard))
-        {
-            if (combo.size() < 1) {
-                continue;
-            }
-            comboTasks.add(
-                new Callable<SegmentHeader>() {
-                    public SegmentHeader call() throws Exception {
-                        return
-                            analyzeCombo(
-                                headerRef,
-                                combo,
-                                matchingSegments);
-                    }
-            });
-        }
-        final SegmentHeader matchingComboHeader =
-            Util.executeDistributedTasks(
-                comboTasks,
-                executor,
-                true);
-
-        if (matchingComboHeader == null) {
-            // Nothing matches.
-            return false;
-        }
-
-        // A match was found.
-        final SegmentBody sb =
-            segmentCacheWorker.get(matchingComboHeader);
-
-        // The segment might have been flushed since. Better
-        // to be sure than sorry.
-        if (sb == null) {
-            return false;
-        }
-
-        // Set the data object.
-        map.put(
-            segment,
-            Pair.of(
-                SegmentHeader.addData(segment, sb),
-                (Throwable) null));
-
-        return true;
-    }
-
-    private SegmentHeader analyzeCombo(
-        final SegmentHeader headerRef,
-        List<ConstrainedColumn> comb,
-        Set<SegmentHeader> matchingSegments)
-    {
-        List<ConstrainedColumn> newColValues =
-            new ArrayList<ConstrainedColumn>();
-        for (ConstrainedColumn cc : comb) {
-            newColValues.add(
-                new ConstrainedColumn(
-                    cc.columnExpression,
-                    new Object[] { true }));
-        }
-        // Get a header key for that 'theoretical' segment.
-        SegmentHeader combHeader =
-            headerRef.clone(
-                newColValues.toArray(
-                    new ConstrainedColumn[newColValues.size()]));
-        if (matchingSegments.contains(combHeader)) {
-            return combHeader;
-        } else {
-            return null;
         }
     }
 
@@ -1069,7 +852,7 @@ public class SegmentLoader {
         abstract ConstrainedColumn[] getConstrainedColumns();
         abstract SegmentDataset getDataset();
         abstract Object[] getValuesForColumn(ConstrainedColumn cc);
-        abstract SegmentHeader getHeader();
+        abstract mondrian.spi.ConstrainedColumn getHeader();
         public int hashCode() {
             return getHeader().hashCode();
         }

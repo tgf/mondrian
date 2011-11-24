@@ -7,11 +7,10 @@
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
-package mondrian.rolap.agg;
+package mondrian.spi;
 
 import mondrian.olap.Util;
-import mondrian.rolap.*;
-import mondrian.rolap.agg.Segment.ExcludedRegion;
+import mondrian.rolap.BitKey;
 import mondrian.util.ByteString;
 
 import java.io.Serializable;
@@ -168,32 +167,6 @@ public class SegmentHeader implements Serializable {
         this.hashCode = hash;
     }
 
-    /**
-     * Converts a segment plus a {@link mondrian.rolap.agg.SegmentBody} into a
-     * {@link mondrian.rolap.agg.SegmentWithData}.
-     *
-     * @param segment Segment
-     * @param sb Segment body
-     * @return SegmentWithData
-     */
-    public static SegmentWithData addData(Segment segment, SegmentBody sb) {
-        // Load the axis keys for this segment
-        SegmentAxis[] axes =
-            new SegmentAxis[segment.predicates.length];
-        for (int i = 0; i < segment.predicates.length; i++) {
-            StarColumnPredicate predicate =
-                segment.predicates[i];
-            axes[i] =
-                new SegmentAxis(
-                    predicate,
-                    sb.getAxisValueSets()[i],
-                    sb.getNullAxisFlags()[i]);
-        }
-        final SegmentDataset dataSet =
-            sb.createSegmentDataset(segment, axes);
-        return new SegmentWithData(segment, dataSet, axes);
-    }
-
     public int hashCode() {
         return hashCode;
     }
@@ -206,144 +179,6 @@ public class SegmentHeader implements Serializable {
             return false;
         }
         return ((SegmentHeader)obj).getUniqueID().equals(this.getUniqueID());
-    }
-
-    public static ConstrainedColumn[] forCacheRegion(
-        RolapCacheRegion region)
-    {
-        final ConstrainedColumn[] cc =
-            new ConstrainedColumn[region.getColumnPredicates().size()];
-        int i = 0;
-        for (StarColumnPredicate predicate : region.getColumnPredicates()) {
-            // First get the values
-            final List<Object> values = new ArrayList<Object>();
-            predicate.values(values);
-            // Now build the CC object
-            cc[i] =
-                new SegmentHeader.ConstrainedColumn(
-                    predicate.getConstrainedColumn()
-                        .getExpression().getGenericExpression(),
-                    values.toArray());
-            i++;
-        }
-        return cc;
-    }
-
-    /**
-     * Creates a segment from this SegmentHeader. The star,
-     * constrainedColsBitKey, constrainedColumns and measure arguments are a
-     * helping hand, because we know what we were looking for.
-     *
-     * @param star Star
-     * @param constrainedColumnsBitKey Constrained columns
-     * @param constrainedColumns Constrained columns
-     * @param measure Measure
-     * @return Segment
-     */
-    public Segment toSegment(
-        RolapStar star,
-        BitKey constrainedColumnsBitKey,
-        RolapStar.Column[] constrainedColumns,
-        RolapStar.Measure measure)
-    {
-        // TODO: read compoundPredicateList from the SegmentHeader
-        final List<StarColumnPredicate> predicateList =
-            new ArrayList<StarColumnPredicate>();
-        for (int i = 0; i < constrainedColumns.length; i++) {
-            RolapStar.Column constrainedColumn = constrainedColumns[i];
-            final Object[] values = this.constrainedColumns[i].values;
-            StarColumnPredicate predicate;
-            if (values == null) {
-                predicate =
-                    new LiteralStarPredicate(
-                        constrainedColumn,
-                        true);
-            } else if (values.length == 1) {
-                predicate =
-                    new ValueColumnPredicate(
-                        constrainedColumn,
-                        values[0]);
-            } else {
-                final List<StarColumnPredicate> valuePredicateList =
-                    new ArrayList<StarColumnPredicate>();
-                for (Object value : values) {
-                    valuePredicateList.add(
-                        new ValueColumnPredicate(
-                            constrainedColumn,
-                            value));
-                }
-                predicate =
-                    new ListColumnPredicate(
-                        constrainedColumn,
-                        valuePredicateList);
-            }
-            predicateList.add(predicate);
-        }
-
-        List<StarPredicate> compoundPredicateList = Collections.emptyList();
-        return new Segment(
-            star,
-            constrainedColumnsBitKey,
-            constrainedColumns,
-            measure,
-            predicateList.toArray(
-                new StarColumnPredicate[predicateList.size()]),
-            new ExcludedRegionList(),
-            compoundPredicateList);
-    }
-
-    ExcludedRegion getExcludedRegion() {
-        return new ExcludedRegionList();
-    }
-
-    private class ExcludedRegionList
-        extends AbstractList<Segment.ExcludedRegion>
-        implements Segment.ExcludedRegion
-    {
-        private final int cellCount;
-        public ExcludedRegionList() {
-            int cellCount = 1;
-            for (ConstrainedColumn cc : excludedRegions) {
-                // TODO find a way to approximate the cardinality
-                // of wildcard columns.
-                if (cc.values != null) {
-                    cellCount *= cc.values.length;
-                }
-            }
-            this.cellCount = cellCount;
-        }
-        public void describe(StringBuilder buf) {
-            // TODO
-        }
-        public int getArrity() {
-            return excludedRegions.length;
-        }
-        public int getCellCount() {
-            return cellCount;
-        }
-        public boolean wouldContain(Object[] keys) {
-            assert keys.length == constrainedColumns.length;
-            for (int i = 0; i < keys.length; i++) {
-                final ConstrainedColumn excl =
-                    getExcludedRegion(
-                        constrainedColumns[i].columnExpression);
-                if (excl == null) {
-                    continue;
-                }
-                if (Arrays.asList(excl.values)
-                        .contains(keys[i]))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-        public ExcludedRegion get(int index) {
-            return this;
-        }
-        public int size() {
-            return 1;
-        }
     }
 
     /**
@@ -449,108 +284,6 @@ public class SegmentHeader implements Serializable {
                     new ConstrainedColumn[newRegions.size()]));
     }
 
-    /**
-     * Constrained columns are part of the SegmentHeader and SegmentCache.
-     * They uniquely identify a constrained column within a segment.
-     * Each segment can have many constrained columns. Each column can
-     * be constrained by multiple values at once (similar to a SQL in()
-     * predicate).
-     *
-     * <p>They are immutable and serializable.
-     */
-    public static class ConstrainedColumn implements Serializable {
-        private static final long serialVersionUID = -5227838916517784720L;
-        final String columnExpression;
-        final Object[] values;
-        private int hashCode = Integer.MIN_VALUE;
-
-        /**
-         * Creates a ConstrainedColumn.
-         *
-         * @param columnExpression Name of the source table into which the
-         * constrained column is, as defined in the Mondrian schema.
-         *
-         * @param valueList List of values to constrain the
-         *     column to, or null if unconstrained. Values must be
-         *     {@link Comparable} and immutable. For example, Integer, Boolean,
-         *     String or Double.
-         */
-        public ConstrainedColumn(
-            String columnExpression,
-            Object[] valueList)
-        {
-            this.columnExpression = columnExpression;
-            this.values = valueList == null ? null : valueList.clone();
-        }
-
-        /**
-         * Merged the current constrained column with another
-         * resulting in a super set of both.
-         */
-        public ConstrainedColumn merge(ConstrainedColumn col) {
-            if (!col.columnExpression.equals(this.columnExpression)) {
-                return this;
-            }
-            final List<Object> ccMergedValues =
-                new ArrayList<Object>();
-            // If any values are wildcard, the merged result is a wildcard.
-            if (this.values == null || col.values == null) {
-                return new ConstrainedColumn(
-                    columnExpression,
-                    null);
-            }
-            // Merge the values by hash/equality.
-            ccMergedValues.addAll(Arrays.asList(this.values));
-            for (Object value : col.values) {
-                if (!ccMergedValues.contains(value)) {
-                    ccMergedValues.add(value);
-                }
-            }
-            return new ConstrainedColumn(
-                columnExpression,
-                ccMergedValues.toArray());
-        }
-
-        /**
-         * Returns the column expression of this constrained column.
-         * @return A column expression.
-         */
-        public String getColumnExpression() {
-            return columnExpression;
-        }
-
-        /**
-         * Returns an array of predicate values for this column.
-         * @return An array of object values.
-         */
-        public Object[] getValues() {
-            return values;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (!(obj instanceof ConstrainedColumn)) {
-                return false;
-            }
-            ConstrainedColumn that = (ConstrainedColumn) obj;
-            return this.columnExpression.equals(that.columnExpression)
-                && Arrays.equals(this.values, that.values);
-        }
-
-        @Override
-        public int hashCode() {
-            if (this.hashCode  == Integer.MIN_VALUE) {
-                int hash = super.hashCode();
-                hash = Util.hash(hash, this.columnExpression);
-                for (Object val : this.values) {
-                    hash = Util.hash(hash, val);
-                }
-                this.hashCode = hash;
-            }
-            return hashCode;
-        }
-    }
-
     public String toString() {
         return this.getDescription();
     }
@@ -622,36 +355,6 @@ public class SegmentHeader implements Serializable {
 
     public BitKey getConstrainedColumnsBitKey() {
         return this.constrainedColsBitKey.copy();
-    }
-
-    /**
-     * Tells if the passed segment is a subset of this segment
-     * and could be used for a rollup in cache operation.
-     * @param segment A segment which might be a subset of the
-     * current segment.
-     * @return True or false.
-     */
-    public boolean isSubset(Segment segment) {
-        if (!segment.getStar().getSchema().getName().equals(schemaName)) {
-            return false;
-        }
-        if (!segment.getStar().getFactTable().getAlias()
-                .equals(rolapStarFactTableName))
-        {
-            return false;
-        }
-        if (!segment.measure.getName().equals(measureName)) {
-            return false;
-        }
-        if (!segment.measure.getCubeName().equals(cubeName)) {
-            return false;
-        }
-        if (segment.getConstrainedColumnsBitKey()
-                .equals(constrainedColsBitKey))
-        {
-            return true;
-        }
-        return false;
     }
 
     /**

@@ -16,6 +16,7 @@ import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
 import mondrian.spi.Dialect;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.*;
 
 import org.apache.log4j.Logger;
@@ -165,14 +166,15 @@ public class FastBatchingCellReader implements CellReader {
             final SegmentHeader header = headerBody.left;
             if (segmentHeaderResults.add(header)) {
                 Segment segment =
-                    header.toSegment(
+                    SegmentBuilder.toSegment(
+                        header,
                         request.getMeasure().getStar(),
                         request.getConstrainedColumnsBitKey(),
                         request.getConstrainedColumns(),
                         request.getMeasure());
                 final SegmentBody body = headerBody.right;
                 final SegmentWithData segmentWithData =
-                    SegmentHeader.addData(segment, body);
+                    SegmentBuilder.addData(segment, body);
                 futureSegments.add(
                     new CompletedFuture<SegmentWithData>(
                         segmentWithData, null));

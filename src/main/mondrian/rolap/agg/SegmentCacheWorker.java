@@ -12,6 +12,7 @@ package mondrian.rolap.agg;
 import mondrian.olap.MondrianProperties;
 import mondrian.resource.MondrianResource;
 import mondrian.spi.SegmentCache;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.ServiceDiscovery;
 
 import org.apache.log4j.Logger;
@@ -288,6 +289,10 @@ public final class SegmentCacheWorker {
 
     public boolean supportsRichIndex() {
         return cache.supportsRichIndex();
+    }
+
+    public void shutdown() {
+        cache.tearDown();
     }
 }
 

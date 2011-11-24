@@ -10,8 +10,8 @@
 package mondrian.rolap.cache;
 
 import mondrian.rolap.BitKey;
-import mondrian.rolap.agg.SegmentHeader;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.util.ByteString;
 
 import java.util.List;
@@ -50,8 +50,7 @@ public interface SegmentCacheIndex {
     /**
      * Adds a header to the index.
      */
-    void add(
-        SegmentHeader header);
+    void add(SegmentHeader header);
 
     /**
      * Removes a header from the index.

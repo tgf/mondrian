@@ -14,7 +14,8 @@ import mondrian.olap.Member;
 import mondrian.olap.Util;
 import mondrian.olap.CacheControl.CellRegion;
 import mondrian.rolap.*;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.rolap.cache.SegmentCacheIndex;
 import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.util.Pair;
@@ -704,14 +705,6 @@ public class SegmentCacheManager {
                 e.printStackTrace();
             } finally {
                 thread = null;
-            }
-        }
-
-        public void shutdown() {
-            // No point sending a command if (for some reason) there's no thread
-            // listening to the command queue.
-            if (thread != null) {
-                execute(null, new ShutdownCommand());
             }
         }
 

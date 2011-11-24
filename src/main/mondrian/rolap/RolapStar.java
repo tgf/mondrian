@@ -20,6 +20,7 @@ import mondrian.rolap.sql.SqlQuery;
 import mondrian.server.Locus;
 import mondrian.spi.DataSourceChangeListener;
 import mondrian.spi.Dialect;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.Bug;
 
 import org.apache.log4j.Logger;
@@ -214,13 +215,14 @@ public class RolapStar {
                         return null;
                     }
                     final Segment emptySegment =
-                        headers.get(0).toSegment(
+                        SegmentBuilder.toSegment(
+                            headers.get(0),
                             RolapStar.this,
                             request.getConstrainedColumnsBitKey(),
                             request.getConstrainedColumns(),
                             request.getMeasure());
                     final SegmentWithData segment =
-                        SegmentHeader.addData(emptySegment, sb);
+                        SegmentBuilder.addData(emptySegment, sb);
                     return segment.getCellValue(request.getSingleValues());
                 }
             });

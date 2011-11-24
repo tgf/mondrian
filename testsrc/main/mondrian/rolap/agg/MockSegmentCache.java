@@ -10,7 +10,9 @@
 package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.spi.SegmentCache;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.CompletedFuture;
 
 import java.io.*;
@@ -36,12 +38,12 @@ public class MockSegmentCache implements SegmentCache {
 
     private final static int maxElements = 100;
 
-    public Future<Boolean> contains(final SegmentHeader header) {
+    public Future<Boolean> contains(SegmentHeader header) {
         return new CompletedFuture<Boolean>(
             cache.containsKey(header), null);
     }
 
-    public Future<SegmentBody> get(final SegmentHeader header) {
+    public Future<SegmentBody> get(SegmentHeader header) {
         return new CompletedFuture<SegmentBody>(
             cache.get(header), null);
     }
@@ -62,7 +64,7 @@ public class MockSegmentCache implements SegmentCache {
             byte[] pickled = out.toByteArray();
             InputStream in = new ByteArrayInputStream(pickled);
             ObjectInputStream ois = new ObjectInputStream(in);
-            SegmentHeader o = (SegmentHeader) ois.readObject();
+            ConstrainedColumn o = (ConstrainedColumn) ois.readObject();
             Util.discard(o);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -155,6 +157,7 @@ public class MockSegmentCache implements SegmentCache {
     }
 
     public void tearDown() {
+        listeners.clear();
         cache.clear();
     }
 

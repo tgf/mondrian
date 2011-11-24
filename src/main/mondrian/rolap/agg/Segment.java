@@ -14,7 +14,8 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.rolap.sql.SqlQuery;
 
 import org.apache.log4j.Logger;
@@ -85,13 +86,13 @@ public class Segment {
      */
     protected final RolapStar.Column[] columns;
 
-    final RolapStar.Measure measure;
+    public final RolapStar.Measure measure;
 
     /**
      * An array of axes, one for each constraining column, containing the values
      * returned for that constraining column.
      */
-    final StarColumnPredicate[] predicates;
+    public final StarColumnPredicate[] predicates;
 
     protected final RolapStar star;
     protected final BitKey constrainedColumnsBitKey;

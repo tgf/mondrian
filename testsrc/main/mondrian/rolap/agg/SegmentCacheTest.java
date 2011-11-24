@@ -14,6 +14,7 @@ import mondrian.olap.Cube;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.MondrianServer;
 import mondrian.spi.SegmentCache;
+import mondrian.spi.SegmentHeader;
 import mondrian.test.BasicQueryTest;
 
 import java.util.ArrayList;

@@ -10,7 +10,7 @@
 package mondrian.rolap.cache;
 
 import mondrian.rolap.agg.SegmentBody;
-import mondrian.rolap.agg.SegmentHeader;
+import mondrian.spi.SegmentHeader;
 import mondrian.spi.SegmentCache;
 import mondrian.util.CompletedFuture;
 
@@ -134,6 +134,7 @@ public class MemorySegmentCache implements SegmentCache {
 
     public void tearDown() {
         map.clear();
+        listeners.clear();
     }
 
     public void addListener(SegmentCacheListener l) {

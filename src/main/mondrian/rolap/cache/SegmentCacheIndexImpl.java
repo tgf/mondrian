@@ -11,8 +11,8 @@ package mondrian.rolap.cache;
 
 import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
-import mondrian.rolap.agg.SegmentHeader;
-import mondrian.rolap.agg.SegmentHeader.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+import mondrian.spi.ConstrainedColumn;
 import mondrian.util.ByteString;
 
 import java.util.*;
@@ -122,7 +122,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         }
         for (Map.Entry<String, Comparable<?>> entry : coords.entrySet()) {
             // Check if the segment explicitly excludes this coordinate.
-            final SegmentHeader.ConstrainedColumn excludedColumn =
+            final ConstrainedColumn excludedColumn =
                 header.getExcludedRegion(entry.getKey());
             if (excludedColumn != null) {
                 final Object[] values = excludedColumn.getValues();
@@ -134,7 +134,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             }
             // Check if the dimensionality of the segment intersects
             // with the coordinate.
-            final SegmentHeader.ConstrainedColumn constrainedColumn =
+            final ConstrainedColumn constrainedColumn =
                 header.getConstrainedColumn(entry.getKey());
             if (constrainedColumn == null) {
                 throw Util.newInternal(
@@ -213,7 +213,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             return true;
         }
         for (ConstrainedColumn regionColumn : region) {
-            final SegmentHeader.ConstrainedColumn headerColumn =
+            final ConstrainedColumn headerColumn =
                 header.getConstrainedColumn(regionColumn.getColumnExpression());
             if (headerColumn == null) {
                 /*
