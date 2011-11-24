@@ -125,10 +125,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             final ConstrainedColumn excludedColumn =
                 header.getExcludedRegion(entry.getKey());
             if (excludedColumn != null) {
-                final Object[] values = excludedColumn.getValues();
-                if (values == null
-                    || Arrays.asList(values).contains(entry.getValue()))
-                {
+                final SortedSet<Comparable<?>> values =
+                    excludedColumn.getValues();
+                if (values == null || values.contains(entry.getValue())) {
                     return false;
                 }
             }
@@ -142,10 +141,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                     + entry.getKey()
                     + "' not found");
             }
-            final Object[] values = constrainedColumn.getValues();
-            if (values != null
-                && !Arrays.asList(values).contains(entry.getValue()))
-            {
+            final SortedSet<Comparable<?>> values =
+                constrainedColumn.getValues();
+            if (values != null && values.contains(entry.getValue())) {
                 return false;
             }
         }
@@ -223,18 +221,18 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                  */
                 return true;
             }
-            final Object[] regionValues = regionColumn.getValues();
-            final Object[] headerValues = regionColumn.getValues();
+            final SortedSet<Comparable<?>> regionValues =
+                regionColumn.getValues();
+            final SortedSet<Comparable<?>> headerValues =
+                regionColumn.getValues();
             if (headerValues == null || regionValues == null) {
                 /*
                  * This is a wildcard, so it always intersects.
                  */
                 return true;
             }
-            final Set<Object> headerValuesHashedSet =
-                new HashSet<Object>(Arrays.asList(headerValues));
-            for (Object myValue : regionValues) {
-                if (headerValuesHashedSet.contains(myValue)) {
+            for (Comparable<?> myValue : regionValues) {
+                if (headerValues.contains(myValue)) {
                     return true;
                 }
             }

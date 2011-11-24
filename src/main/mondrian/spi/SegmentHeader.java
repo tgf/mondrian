@@ -155,11 +155,15 @@ public class SegmentHeader implements Serializable {
         hash = Util.hash(hash, measureName);
         for (ConstrainedColumn col : this.constrainedColumns) {
             hash = Util.hash(hash, col.columnExpression);
-            hash = Util.hashArray(hash, col.values);
+            if (col.values != null) {
+                hash = Util.hashArray(hash, col.values.toArray());
+            }
         }
         for (ConstrainedColumn col : this.excludedRegions) {
             hash = Util.hash(hash, col.columnExpression);
-            hash = Util.hashArray(hash, col.values);
+            if (col.values != null) {
+                hash = Util.hashArray(hash, col.values.toArray());
+            }
         }
         for (String col : this.compoundPredicates) {
             hash = Util.hash(hash, col);

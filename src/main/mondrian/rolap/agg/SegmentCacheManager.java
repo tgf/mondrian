@@ -237,10 +237,14 @@ import java.util.concurrent.*;
 public class SegmentCacheManager {
     private final Handler handler = new Handler();
 
+    private static final Actor ACTOR;
+
+    static {
+        ACTOR = new Actor();
+    }
+
     public final SegmentCacheIndex segmentIndex =
         new SegmentCacheIndexImpl(ACTOR.thread);
-
-    private static final Actor ACTOR = new Actor();
 
     static {
         // Create and start thread for actor.

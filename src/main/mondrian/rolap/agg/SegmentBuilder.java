@@ -9,20 +9,25 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
-import mondrian.rolap.RolapCacheRegion;
+import mondrian.rolap.RolapSchema;
 import mondrian.rolap.RolapStar;
 import mondrian.rolap.StarColumnPredicate;
 import mondrian.rolap.StarPredicate;
 import mondrian.rolap.agg.Segment.ExcludedRegion;
+import mondrian.rolap.sql.SqlQuery;
 import mondrian.spi.ConstrainedColumn;
 import mondrian.spi.SegmentHeader;
+import mondrian.util.ArraySortedSet;
 
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.SortedSet;
 
 /**
  * This helper class contains methods to convert between
@@ -58,31 +63,6 @@ public class SegmentBuilder {
     }
 
     /**
-     * Builds an array of ConstrainedColumn objects from
-     * a {@link RolapCacheRegion}.
-     */
-    public static ConstrainedColumn[] forCacheRegion(
-        RolapCacheRegion region)
-    {
-        final ConstrainedColumn[] cc =
-            new ConstrainedColumn[region.getColumnPredicates().size()];
-        int i = 0;
-        for (StarColumnPredicate predicate : region.getColumnPredicates()) {
-            // First get the values
-            final List<Object> values = new ArrayList<Object>();
-            predicate.values(values);
-            // Now build the CC object
-            cc[i] =
-                new ConstrainedColumn(
-                    predicate.getConstrainedColumn()
-                        .getExpression().getGenericExpression(),
-                    values.toArray());
-            i++;
-        }
-        return cc;
-    }
-
-    /**
      * Creates a segment from a SegmentHeader. The star,
      * constrainedColsBitKey, constrainedColumns and measure arguments are a
      * helping hand, because we know what we were looking for.
@@ -106,18 +86,19 @@ public class SegmentBuilder {
             new ArrayList<StarColumnPredicate>();
         for (int i = 0; i < constrainedColumns.length; i++) {
             RolapStar.Column constrainedColumn = constrainedColumns[i];
-            final Object[] values = header.getConstrainedColumns()[i].values;
+            final SortedSet<Comparable<?>> values =
+                header.getConstrainedColumns()[i].values;
             StarColumnPredicate predicate;
             if (values == null) {
                 predicate =
                     new LiteralStarPredicate(
                         constrainedColumn,
                         true);
-            } else if (values.length == 1) {
+            } else if (values.size() == 1) {
                 predicate =
                     new ValueColumnPredicate(
                         constrainedColumn,
-                        values[0]);
+                        values.first());
             } else {
                 final List<StarColumnPredicate> valuePredicateList =
                     new ArrayList<StarColumnPredicate>();
@@ -160,7 +141,7 @@ public class SegmentBuilder {
                 // TODO find a way to approximate the cardinality
                 // of wildcard columns.
                 if (cc.values != null) {
-                    cellCount *= cc.values.length;
+                    cellCount *= cc.values.size();
                 }
             }
             this.cellCount = cellCount;
@@ -183,9 +164,7 @@ public class SegmentBuilder {
                 if (excl == null) {
                     continue;
                 }
-                if (Arrays.asList(excl.values)
-                        .contains(keys[i]))
-                {
+                if (excl.values.contains(keys[i])) {
                     return true;
                 }
             }
@@ -206,7 +185,7 @@ public class SegmentBuilder {
      * current segment.
      * @return True or false.
      */
-    public boolean isSubset(
+    public static boolean isSubset(
         SegmentHeader header,
         Segment segment)
     {
@@ -232,6 +211,77 @@ public class SegmentBuilder {
             return true;
         }
         return false;
+    }
+
+    public static ConstrainedColumn[] toConstrainedColumns(
+        StarColumnPredicate[] predicates)
+    {
+        return toConstrainedColumns(
+            Arrays.asList(predicates));
+    }
+
+    public static ConstrainedColumn[] toConstrainedColumns(
+        Collection<StarColumnPredicate> predicates)
+    {
+        List<ConstrainedColumn> ccs =
+            new ArrayList<ConstrainedColumn>();
+        for (StarColumnPredicate predicate : predicates) {
+            final List<Comparable<?>> values =
+                new ArrayList<Comparable<?>>();
+            predicate.values(Util.cast(values));
+            final Comparable<?>[] valuesArray =
+                values.toArray(new Comparable<?>[values.size()]);
+            if (valuesArray.length == 1 && valuesArray[0].equals(true)) {
+                ccs.add(
+                    new ConstrainedColumn(
+                        predicate.getConstrainedColumn()
+                            .getExpression().getGenericExpression(),
+                        null));
+            } else {
+                Arrays.sort(valuesArray);
+                ccs.add(
+                    new ConstrainedColumn(
+                        predicate.getConstrainedColumn()
+                        .getExpression().getGenericExpression(),
+                        new ArraySortedSet(valuesArray)));
+            }
+        }
+        return ccs.toArray(new ConstrainedColumn[ccs.size()]);
+    }
+
+    /**
+     * Creates a SegmentHeader object describing the supplied
+     * Segment object.
+     *
+     * @param segment A segment object for which we want to generate
+     * a SegmentHeader.
+     * @return A SegmentHeader describing the supplied Segment object.
+     */
+    public static SegmentHeader toHeader(Segment segment) {
+        final ConstrainedColumn[] cc =
+            SegmentBuilder.toConstrainedColumns(segment.predicates);
+        final List<String> cp = new ArrayList<String>();
+
+        StringBuilder buf = new StringBuilder();
+
+        for (StarPredicate compoundPredicate : segment.compoundPredicateList) {
+            buf.setLength(0);
+            SqlQuery query =
+                new SqlQuery(
+                    segment.star.getSqlQueryDialect());
+            compoundPredicate.toSql(query, buf);
+            cp.add(buf.toString());
+        }
+        final RolapSchema schema = segment.star.getSchema();
+        return new SegmentHeader(
+            schema.getName(),
+            schema.getChecksum(),
+            segment.measure.getCubeName(),
+            segment.measure.getName(),
+            cc,
+            cp.toArray(new String[cp.size()]),
+            segment.star.getFactTable().getAlias(),
+            segment.constrainedColumnsBitKey);
     }
 }
 

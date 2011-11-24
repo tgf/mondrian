@@ -14,8 +14,6 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
-import mondrian.rolap.sql.SqlQuery;
-import mondrian.spi.ConstrainedColumn;
 import mondrian.spi.SegmentHeader;
 
 import org.apache.log4j.Logger;
@@ -155,7 +153,7 @@ public class Segment {
                 constrainedColumnsBitKey,
                 star,
                 compoundPredicateBitKeys);
-        this.segmentHeader = toHeader();
+        this.segmentHeader = SegmentBuilder.toHeader(this);
     }
 
     /**
@@ -337,63 +335,6 @@ public class Segment {
          * in this region.
          */
         public int getCellCount();
-    }
-
-    /**
-     * Creates a SegmentHeader object describing the supplied
-     * Segment object.
-     *
-     * @param segment A segment object for which we want to generate
-     * a SegmentHeader.
-     * @return A SegmentHeader describing the supplied Segment object.
-     */
-    private SegmentHeader toHeader() {
-        final List<ConstrainedColumn> cc =
-            new ArrayList<ConstrainedColumn>();
-        final List<String> cp = new ArrayList<String>();
-        for (StarColumnPredicate predicate : this.predicates) {
-            cc.add(toConstrainedColumn(predicate));
-        }
-        StringBuilder buf = new StringBuilder();
-        for (StarPredicate compoundPredicate : compoundPredicateList) {
-            buf.setLength(0);
-            SqlQuery query =
-                new SqlQuery(
-                    getStar().getSqlQueryDialect());
-            compoundPredicate.toSql(query, buf);
-            cp.add(buf.toString());
-        }
-        final RolapSchema schema = star.getSchema();
-        return new SegmentHeader(
-            schema.getName(),
-            schema.getChecksum(),
-            measure.getCubeName(),
-            measure.getName(),
-            cc.toArray(new ConstrainedColumn[cc.size()]),
-            cp.toArray(new String[cp.size()]),
-            star.getFactTable().getAlias(),
-            getConstrainedColumnsBitKey());
-    }
-
-    private static ConstrainedColumn toConstrainedColumn(
-        StarColumnPredicate predicate)
-    {
-        if (predicate instanceof LiteralStarPredicate
-            && predicate.evaluate(Collections.emptyList()))
-        {
-            // Column is not constrained, i.e. wildcard.
-            return new ConstrainedColumn(
-                predicate.getConstrainedColumn()
-                    .getExpression().getGenericExpression(),
-                null);
-        }
-
-        final List<Object> values = new ArrayList<Object>();
-        predicate.values(values);
-        return new ConstrainedColumn(
-            predicate.getConstrainedColumn()
-                .getExpression().getGenericExpression(),
-            values.toArray());
     }
 
     public SegmentHeader getHeader() {

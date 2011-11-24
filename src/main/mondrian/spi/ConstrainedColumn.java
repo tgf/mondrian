@@ -10,11 +10,10 @@
 package mondrian.spi;
 
 import mondrian.olap.Util;
+import mondrian.util.ArraySortedSet;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.SortedSet;
 
 
 /**
@@ -29,8 +28,8 @@ import java.util.List;
 public class ConstrainedColumn implements Serializable {
     private static final long serialVersionUID = -5227838916517784720L;
     public final String columnExpression;
-    public final Object[] values;
-    private int hashCode = Integer.MIN_VALUE;
+    public final SortedSet<Comparable<?>> values;
+    private final int hashCode;
 
     /**
      * Creates a ConstrainedColumn.
@@ -45,10 +44,18 @@ public class ConstrainedColumn implements Serializable {
      */
     public ConstrainedColumn(
         String columnExpression,
-        Object[] valueList)
+        SortedSet<Comparable<?>> valueList)
     {
         this.columnExpression = columnExpression;
-        this.values = valueList == null ? null : valueList.clone();
+        this.values = valueList;
+        int hash = super.hashCode();
+        hash = Util.hash(hash, this.columnExpression);
+        if (this.values != null) {
+            for (Object val : this.values) {
+                hash = Util.hash(hash, val);
+            }
+        }
+        this.hashCode = hash;
     }
 
     /**
@@ -56,27 +63,20 @@ public class ConstrainedColumn implements Serializable {
      * resulting in a super set of both.
      */
     public ConstrainedColumn merge(ConstrainedColumn col) {
-        if (!col.columnExpression.equals(this.columnExpression)) {
-            return this;
-        }
-        final List<Object> ccMergedValues =
-            new ArrayList<Object>();
+        assert col != null;
+        assert col.columnExpression.equals(this.columnExpression);
+
         // If any values are wildcard, the merged result is a wildcard.
         if (this.values == null || col.values == null) {
             return new ConstrainedColumn(
                 columnExpression,
                 null);
         }
-        // Merge the values by hash/equality.
-        ccMergedValues.addAll(Arrays.asList(this.values));
-        for (Object value : col.values) {
-            if (!ccMergedValues.contains(value)) {
-                ccMergedValues.add(value);
-            }
-        }
+
         return new ConstrainedColumn(
             columnExpression,
-            ccMergedValues.toArray());
+            ((ArraySortedSet)this.values).merge(
+                (ArraySortedSet)col.values));
     }
 
     /**
@@ -91,7 +91,7 @@ public class ConstrainedColumn implements Serializable {
      * Returns an array of predicate values for this column.
      * @return An array of object values.
      */
-    public Object[] getValues() {
+    public SortedSet<Comparable<?>> getValues() {
         return values;
     }
 
@@ -101,20 +101,15 @@ public class ConstrainedColumn implements Serializable {
             return false;
         }
         ConstrainedColumn that = (ConstrainedColumn) obj;
+        if (this.values == null && that.values == null) {
+            return true;
+        }
         return this.columnExpression.equals(that.columnExpression)
-            && Arrays.equals(this.values, that.values);
+            && Util.equals(this.values, that.values);
     }
 
     @Override
     public int hashCode() {
-        if (this.hashCode  == Integer.MIN_VALUE) {
-            int hash = super.hashCode();
-            hash = Util.hash(hash, this.columnExpression);
-            for (Object val : this.values) {
-                hash = Util.hash(hash, val);
-            }
-            this.hashCode = hash;
-        }
         return hashCode;
     }
 }

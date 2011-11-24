@@ -497,8 +497,7 @@ public class RolapResult extends ResultBase {
                 batchingReader.getMissCount(),
                 batchingReader.getPendingCount());
 
-            batchingReader.loadAggregations();
-            return true;
+            return batchingReader.loadAggregations();
         } else {
             return false;
         }

@@ -31,6 +31,7 @@ public class ArraySortedSet<E extends Comparable<E>>
     private final E[] values;
     private final int start;
     private final int end;
+    private final int hashCode;
 
     /**
      * Creates a set backed by an array. The array must be sorted, and is
@@ -51,9 +52,15 @@ public class ArraySortedSet<E extends Comparable<E>>
      * @param end Index of first element after end of region
      */
     public ArraySortedSet(E[] values, int start, int end) {
+        super();
         this.values = values;
         this.start = start;
         this.end = end;
+        int hash = super.hashCode();
+        for (Object comp : this.toArray()) {
+            hash = Util.hash(hash, comp);
+        }
+        this.hashCode = hash;
     }
 
     public Iterator<E> iterator() {
@@ -155,11 +162,80 @@ public class ArraySortedSet<E extends Comparable<E>>
         return r;
     }
 
+    /**
+     * Performs a merge between two {@link ArraySortedSet} instances
+     * in O(n) time, returning a third instance which doesn't include
+     * duplicates.
+     */
+    public ArraySortedSet<E> merge(
+        ArraySortedSet<E> arrayToMerge)
+    {
+        assert arrayToMerge != null;
+
+        // No need to merge when one array is empty.
+        if (this.size() == 0) {
+            return arrayToMerge;
+        }
+        if (arrayToMerge.size() == 0) {
+            return this;
+        }
+
+        final E[] data1 = this.values;
+        final E[] data2 = arrayToMerge.values;
+        final E[] merged =
+            (E[])
+                Util.genericArray(
+                    this.values[0].getClass(),
+                    this.size() + arrayToMerge.size());
+
+        int p1 = 0, p2 = 0, m = 0;
+
+        while (p1 < data1.length && p2 < data2.length) {
+            final int compare =
+                data1[p1].compareTo(data2[p2]);
+            if (compare == 0) {
+                merged[m++] = data1[p1++];
+                p2++;
+            } else if (compare < 0) {
+                merged[m++] = data1[p1++];
+            } else {
+                merged[m++] = data2[p2++];
+            }
+        }
+
+        while (p1 < data1.length) {
+            merged[m++] = data1[p1++];
+        }
+
+        while (p2 < data2.length) {
+            merged[m++] = data2[p2++];
+        }
+
+        return new ArraySortedSet<E>(merged);
+    }
+
     @Override
     public boolean contains(Object o) {
         //noinspection unchecked
         return o != null
             && Util.binarySearch(values, start, end, (E) o) >= 0;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof ArraySortedSet<?>)) {
+            return false;
+        }
+        // REVIEW: Should we not consider start and end boundaries in
+        // the equality check?
+        return Arrays.equals(
+            this.toArray(),
+            ((ArraySortedSet<?>)o).toArray());
+    }
+
+    @Override
+    public int hashCode() {
+        return this.hashCode;
     }
 }
 

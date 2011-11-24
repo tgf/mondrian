@@ -2166,7 +2166,7 @@ public class Util extends XOMUtil {
     }
 
     /**
-     * As {@link Arrays#binarySearch(Object[], int, int, Object)}, but
+     * As Arrays#binarySearch(Object[], int, int, Object), but
      * available pre-JDK 1.6.
      */
     public static <T extends Comparable<T>> int binarySearch(
@@ -2179,6 +2179,11 @@ public class Util extends XOMUtil {
         public String toString() {
             return "#ERR";
         }
+    }
+
+    @SuppressWarnings({"unchecked"})
+    public static <T> T[] genericArray(Class<T> clazz, int size) {
+        return (T[]) Array.newInstance(clazz, size);
     }
 
     /**

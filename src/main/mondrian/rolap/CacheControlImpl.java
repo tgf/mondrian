@@ -19,6 +19,7 @@ import mondrian.server.Execution;
 import mondrian.server.Locus;
 import mondrian.spi.ConstrainedColumn;
 import mondrian.spi.SegmentHeader;
+import mondrian.util.ArraySortedSet;
 
 import org.eigenbase.util.property.BooleanProperty;
 
@@ -437,25 +438,37 @@ public class CacheControlImpl implements CacheControl {
                     if (region.dimension.isMeasures()) {
                         return;
                     }
-                    final Map<String, Set<Object>> levels =
-                        new HashMap<String, Set<Object>>();
+                    final Map<String, Set<Comparable<?>>> levels =
+                        new HashMap<String, Set<Comparable<?>>>();
                     for (Member member : region.memberList) {
                         final String ccName =
                             ((RolapLevel)member.getLevel())
                                 .getKeyExp().getGenericExpression();
                         if (!levels.containsKey(ccName)) {
-                            levels.put(ccName, new HashSet<Object>());
+                            levels.put(ccName, new HashSet<Comparable<?>>());
                         }
                         levels.get(ccName).add(
-                            ((RolapMember)member).getKey());
+                            (Comparable<?>)((RolapMember)member).getKey());
                     }
-                    for (Entry<String, Set<Object>> entry
+                    for (Entry<String, Set<Comparable<?>>> entry
                         : levels.entrySet())
                     {
-                        list.add(
-                            new ConstrainedColumn(
-                                entry.getKey(),
-                                entry.getValue().toArray()));
+                        // Now sort and convert to an ArraySortedSet.
+                        final Comparable<?>[] keys =
+                            entry.getValue().toArray(
+                                new Comparable<?>[entry.getValue().size()]);
+                        if (keys.length == 1 && keys[0].equals(true)) {
+                            list.add(
+                                new ConstrainedColumn(
+                                    entry.getKey(),
+                                    null));
+                        } else {
+                            Arrays.sort(keys);
+                            list.add(
+                                new ConstrainedColumn(
+                                    entry.getKey(),
+                                    new ArraySortedSet(keys)));
+                        }
                     }
                 }
                 public void visit(MemberRangeCellRegion region) {
