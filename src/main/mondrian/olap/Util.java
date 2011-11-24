@@ -222,7 +222,7 @@ public class Util extends XOMUtil {
      * @return An executor service preconfigured.
      */
     public static ExecutorService getExecutorService(
-        final int maxNbThreads, 
+        final int maxNbThreads,
         String name)
     {
         return getExecutorService(maxNbThreads, 0, 1, -1, name);

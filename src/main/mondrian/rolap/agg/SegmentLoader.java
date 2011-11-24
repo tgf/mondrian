@@ -13,10 +13,10 @@ import mondrian.olap.MondrianException;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
-import mondrian.spi.SegmentHeader;
-import mondrian.spi.ConstrainedColumn;
 import mondrian.server.Locus;
 import mondrian.server.monitor.SqlStatementEvent;
+import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.*;
 
 import org.apache.log4j.Logger;

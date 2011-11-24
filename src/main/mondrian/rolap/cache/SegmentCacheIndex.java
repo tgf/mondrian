@@ -10,8 +10,8 @@
 package mondrian.rolap.cache;
 
 import mondrian.rolap.BitKey;
-import mondrian.spi.SegmentHeader;
 import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.ByteString;
 
 import java.util.List;

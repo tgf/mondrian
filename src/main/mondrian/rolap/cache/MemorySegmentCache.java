@@ -10,8 +10,8 @@
 package mondrian.rolap.cache;
 
 import mondrian.rolap.agg.SegmentBody;
-import mondrian.spi.SegmentHeader;
 import mondrian.spi.SegmentCache;
+import mondrian.spi.SegmentHeader;
 import mondrian.util.CompletedFuture;
 
 import java.lang.ref.SoftReference;

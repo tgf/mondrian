@@ -180,8 +180,6 @@ public class AggregationManager extends RolapAggregationManager {
         };
     }
 
-    
-
     public Object getCellFromCache(CellRequest request) {
         return getCellFromCache(request, null);
     }

@@ -9,20 +9,20 @@
 */
 package mondrian.rolap.agg;
 
-import java.util.AbstractList;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-
 import mondrian.rolap.BitKey;
 import mondrian.rolap.RolapCacheRegion;
 import mondrian.rolap.RolapStar;
 import mondrian.rolap.StarColumnPredicate;
 import mondrian.rolap.StarPredicate;
 import mondrian.rolap.agg.Segment.ExcludedRegion;
-import mondrian.spi.SegmentHeader;
 import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
+
+import java.util.AbstractList;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * This helper class contains methods to convert between

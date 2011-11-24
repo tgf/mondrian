@@ -14,9 +14,9 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.rolap.*;
-import mondrian.spi.SegmentHeader;
-import mondrian.spi.ConstrainedColumn;
 import mondrian.rolap.sql.SqlQuery;
+import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
 
 import org.apache.log4j.Logger;
 

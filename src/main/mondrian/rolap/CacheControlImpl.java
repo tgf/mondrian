@@ -13,12 +13,12 @@ import mondrian.olap.*;
 import mondrian.olap.Id.Quoting;
 import mondrian.resource.MondrianResource;
 import mondrian.rolap.agg.SegmentCacheManager;
-import mondrian.spi.SegmentHeader;
-import mondrian.spi.ConstrainedColumn;
 import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.rolap.sql.MemberChildrenConstraint;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
+import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentHeader;
 
 import org.eigenbase.util.property.BooleanProperty;
 

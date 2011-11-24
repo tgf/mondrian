@@ -10,14 +10,12 @@
 package mondrian.rolap.agg;
 
 import mondrian.olap.CacheControl;
+import mondrian.olap.CacheControl.CellRegion;
 import mondrian.olap.Member;
 import mondrian.olap.Util;
-import mondrian.olap.CacheControl.CellRegion;
 import mondrian.rolap.*;
-import mondrian.spi.SegmentHeader;
-import mondrian.spi.ConstrainedColumn;
-import mondrian.rolap.cache.SegmentCacheIndex;
-import mondrian.rolap.cache.SegmentCacheIndexImpl;
+import mondrian.rolap.cache.*;
+import mondrian.spi.*;
 import mondrian.util.Pair;
 
 import java.util.*;
