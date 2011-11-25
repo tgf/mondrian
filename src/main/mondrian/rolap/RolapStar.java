@@ -220,7 +220,8 @@ public class RolapStar {
                             RolapStar.this,
                             request.getConstrainedColumnsBitKey(),
                             request.getConstrainedColumns(),
-                            request.getMeasure());
+                            request.getMeasure(),
+                            aggregationKey.getCompoundPredicateList());
                     final SegmentWithData segment =
                         SegmentBuilder.addData(emptySegment, sb);
                     return segment.getCellValue(request.getSingleValues());

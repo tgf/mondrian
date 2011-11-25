@@ -79,9 +79,9 @@ public class SegmentBuilder {
         RolapStar star,
         BitKey constrainedColumnsBitKey,
         RolapStar.Column[] constrainedColumns,
-        RolapStar.Measure measure)
+        RolapStar.Measure measure,
+        List<StarPredicate> compoundPredicates)
     {
-        // TODO: read compoundPredicateList from the SegmentHeader
         final List<StarColumnPredicate> predicateList =
             new ArrayList<StarColumnPredicate>();
         for (int i = 0; i < constrainedColumns.length; i++) {
@@ -116,7 +116,6 @@ public class SegmentBuilder {
             predicateList.add(predicate);
         }
 
-        List<StarPredicate> compoundPredicateList = Collections.emptyList();
         return new Segment(
             star,
             constrainedColumnsBitKey,
@@ -125,7 +124,7 @@ public class SegmentBuilder {
             predicateList.toArray(
                 new StarColumnPredicate[predicateList.size()]),
             new ExcludedRegionList(header),
-            compoundPredicateList);
+            compoundPredicates);
     }
 
     private static class ExcludedRegionList

@@ -171,7 +171,8 @@ public class FastBatchingCellReader implements CellReader {
                         request.getMeasure().getStar(),
                         request.getConstrainedColumnsBitKey(),
                         request.getConstrainedColumns(),
-                        request.getMeasure());
+                        request.getMeasure(),
+                        key.getCompoundPredicateList());
                 final SegmentBody body = headerBody.right;
                 final SegmentWithData segmentWithData =
                     SegmentBuilder.addData(segment, body);
