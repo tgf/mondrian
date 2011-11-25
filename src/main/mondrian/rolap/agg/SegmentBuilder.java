@@ -25,7 +25,6 @@ import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.SortedSet;
 
@@ -237,7 +236,9 @@ public class SegmentBuilder {
                             .getExpression().getGenericExpression(),
                         null));
             } else {
-                Arrays.sort(valuesArray);
+                Arrays.sort(
+                    valuesArray,
+                    Util.SqlNullSafeComparator.instance);
                 ccs.add(
                     new ConstrainedColumn(
                         predicate.getConstrainedColumn()

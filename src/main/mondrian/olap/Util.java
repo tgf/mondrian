@@ -19,6 +19,8 @@ import mondrian.olap.type.Type;
 import mondrian.resource.MondrianResource;
 import mondrian.rolap.RolapCube;
 import mondrian.rolap.RolapCubeDimension;
+import mondrian.rolap.RolapUtil;
+import mondrian.rolap.agg.ValueColumnPredicate;
 import mondrian.spi.UserDefinedFunction;
 import mondrian.util.*;
 
@@ -4086,6 +4088,30 @@ public class Util extends XOMUtil {
             long getUsed();
             long getCommitted();
             long getMax();
+        }
+    }
+
+    /**
+     * A {@link Comparator} implementation which can deal
+     * correctly with {@link RolapUtil#sqlNullValue}.
+     */
+    public static class SqlNullSafeComparator
+        implements Comparator<Comparable<?>>
+    {
+        public static final SqlNullSafeComparator instance =
+            new SqlNullSafeComparator();
+
+        private SqlNullSafeComparator() {
+        }
+
+        public int compare(Comparable<?> o1, Comparable<?> o2) {
+            if (o1 == RolapUtil.sqlNullValue) {
+                return -1;
+            }
+            if (o2 == RolapUtil.sqlNullValue) {
+                return 1;
+            }
+            return ((Comparable) o1).compareTo(o2);
         }
     }
 }

@@ -463,7 +463,9 @@ public class CacheControlImpl implements CacheControl {
                                     entry.getKey(),
                                     null));
                         } else {
-                            Arrays.sort(keys);
+                            Arrays.sort(
+                                keys,
+                                Util.SqlNullSafeComparator.instance);
                             list.add(
                                 new ConstrainedColumn(
                                     entry.getKey(),
