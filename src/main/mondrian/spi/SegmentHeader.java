@@ -215,7 +215,11 @@ public class SegmentHeader implements Serializable {
 
     /**
      * Checks if this header can be constrained by a given region.
-     * It will return null if the region sits outside of the bounds
+     *
+     * <p>It will return false if the region covers one of the axis in
+     * its entirety.
+     *
+     * <p>It will return false if the region sits outside of the bounds
      * of this header. This means that when performing a flush operation,
      * the header must be scrapped altogether.
      */
@@ -225,10 +229,11 @@ public class SegmentHeader implements Serializable {
             ConstrainedColumn ccActual =
                 getConstrainedColumn(ccToFlush.columnExpression);
             if (ccActual != null) {
-                ConstrainedColumn ccActualExcl =
+                final ConstrainedColumn ccActualExcl =
                     getExcludedRegion(ccToFlush.columnExpression);
-                if (ccActualExcl != null
+                if ((ccActualExcl != null
                     && ccActualExcl.merge(ccToFlush).values == null)
+                    || ccActual.values.equals(ccToFlush.values))
                 {
                     // This means that the whole axis is excluded.
                     // Better destroy that segment.

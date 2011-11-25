@@ -31,7 +31,6 @@ public class ArraySortedSet<E extends Comparable<E>>
     private final E[] values;
     private final int start;
     private final int end;
-    private final int hashCode;
 
     /**
      * Creates a set backed by an array. The array must be sorted, and is
@@ -56,11 +55,6 @@ public class ArraySortedSet<E extends Comparable<E>>
         this.values = values;
         this.start = start;
         this.end = end;
-        int hash = super.hashCode();
-        for (Object comp : this.toArray()) {
-            hash = Util.hash(hash, comp);
-        }
-        this.hashCode = hash;
     }
 
     public Iterator<E> iterator() {
@@ -180,15 +174,16 @@ public class ArraySortedSet<E extends Comparable<E>>
             return this;
         }
 
+        int p1 = 0, p2 = 0, m = 0, k = this.size() + arrayToMerge.size();
+
         final E[] data1 = this.values;
         final E[] data2 = arrayToMerge.values;
-        final E[] merged =
+        E[] merged =
             (E[])
                 Util.genericArray(
                     this.values[0].getClass(),
-                    this.size() + arrayToMerge.size());
+                    k);
 
-        int p1 = 0, p2 = 0, m = 0;
 
         while (p1 < data1.length && p2 < data2.length) {
             final int compare =
@@ -211,6 +206,9 @@ public class ArraySortedSet<E extends Comparable<E>>
             merged[m++] = data2[p2++];
         }
 
+        if (m < k) {
+            merged = Arrays.copyOf(merged, m);
+        }
         return new ArraySortedSet<E>(merged);
     }
 
@@ -219,23 +217,6 @@ public class ArraySortedSet<E extends Comparable<E>>
         //noinspection unchecked
         return o != null
             && Util.binarySearch(values, start, end, (E) o) >= 0;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (!(o instanceof ArraySortedSet<?>)) {
-            return false;
-        }
-        // REVIEW: Should we not consider start and end boundaries in
-        // the equality check?
-        return Arrays.equals(
-            this.toArray(),
-            ((ArraySortedSet<?>)o).toArray());
-    }
-
-    @Override
-    public int hashCode() {
-        return this.hashCode;
     }
 }
 

@@ -143,7 +143,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             }
             final SortedSet<Comparable<?>> values =
                 constrainedColumn.getValues();
-            if (values != null && values.contains(entry.getValue())) {
+            if (values != null
+                && !values.contains(entry.getValue()))
+            {
                 return false;
             }
         }
