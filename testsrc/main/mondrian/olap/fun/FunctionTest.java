@@ -11827,6 +11827,14 @@ Intel platforms):
         }
         buf.append(indent + "  [Gender].[M]})");
     }
+
+    /**
+     * Test for MONDRIAN-1050.
+     */
+    public void testDateParameter() throws Exception {
+        executeQuery(
+            "SELECT {[Measures].[Unit Sales]} ON COLUMNS, Order([Gender].Members, Now(), ASC) ON ROWS FROM [Sales]");
+    }
 }
 
 // End FunctionTest.java
