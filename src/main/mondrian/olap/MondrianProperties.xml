@@ -309,7 +309,7 @@ is an implementation of {@link mondrian.spi.SegmentCache}.
         <Path>mondrian.rolap.SegmentCacheReadTimeout</Path>
         <Description>
 <p>Property which defines the timeout for
-{@link mondrian.spi.SegmentCache#get(mondrian.rolap.agg.SegmentHeader)}
+{@link mondrian.spi.SegmentCache#get(mondrian.spi.SegmentHeader)}
 in milliseconds. Defaults to 5000.</p>
 
 <p>This is an internal control property. The timeout value
@@ -324,7 +324,7 @@ won't be passed to the underlying
         <Path>mondrian.rolap.SegmentCacheWriteTimeout</Path>
         <Description>
 <p>Property which defines the timeout for
-{@link mondrian.spi.SegmentCache#put(mondrian.rolap.agg.SegmentHeader, mondrian.rolap.agg.SegmentBody)}
+{@link mondrian.spi.SegmentCache#put(mondrian.spi.SegmentHeader, mondrian.spi.SegmentBody)}
 in milliseconds. Defaults to 5000.</p>
 
 <p>This is an internal control property. The timeout value
@@ -339,7 +339,7 @@ won't be passed to the underlying
         <Path>mondrian.rolap.SegmentCacheLookupTimeout</Path>
         <Description>
 <p>Property which defines the timeout for
-{@link mondrian.spi.SegmentCache#contains(mondrian.rolap.agg.SegmentHeader)}
+{@link mondrian.spi.SegmentCache#contains(mondrian.spi.SegmentHeader)}
 in milliseconds. Defaults to 5000.</p>
 
 <p>This is an internal control property. The timeout value
