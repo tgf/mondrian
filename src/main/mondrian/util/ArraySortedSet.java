@@ -207,9 +207,10 @@ public class ArraySortedSet<E extends Comparable<E>>
         }
 
         if (m < k) {
-            merged = Arrays.copyOf(merged, m);
+            return new ArraySortedSet<E>(merged, 0, m);
+        } else {
+            return new ArraySortedSet<E>(merged);
         }
-        return new ArraySortedSet<E>(merged);
     }
 
     @Override
