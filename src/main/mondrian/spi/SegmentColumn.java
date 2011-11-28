@@ -24,8 +24,10 @@ import java.util.SortedSet;
  * predicate).
  *
  * <p>They are immutable and serializable.
+ *
+ * @version $Id$
  */
-public class ConstrainedColumn implements Serializable {
+public class SegmentColumn implements Serializable {
     private static final long serialVersionUID = -5227838916517784720L;
     public final String columnExpression;
     public final SortedSet<Comparable<?>> values;
@@ -42,7 +44,7 @@ public class ConstrainedColumn implements Serializable {
      *     {@link Comparable} and immutable. For example, Integer, Boolean,
      *     String or Double.
      */
-    public ConstrainedColumn(
+    public SegmentColumn(
         String columnExpression,
         SortedSet<Comparable<?>> valueList)
     {
@@ -62,18 +64,18 @@ public class ConstrainedColumn implements Serializable {
      * Merged the current constrained column with another
      * resulting in a super set of both.
      */
-    public ConstrainedColumn merge(ConstrainedColumn col) {
+    public SegmentColumn merge(SegmentColumn col) {
         assert col != null;
         assert col.columnExpression.equals(this.columnExpression);
 
         // If any values are wildcard, the merged result is a wildcard.
         if (this.values == null || col.values == null) {
-            return new ConstrainedColumn(
+            return new SegmentColumn(
                 columnExpression,
                 null);
         }
 
-        return new ConstrainedColumn(
+        return new SegmentColumn(
             columnExpression,
             ((ArraySortedSet)this.values).merge(
                 (ArraySortedSet)col.values));
@@ -97,10 +99,10 @@ public class ConstrainedColumn implements Serializable {
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof ConstrainedColumn)) {
+        if (!(obj instanceof SegmentColumn)) {
             return false;
         }
-        ConstrainedColumn that = (ConstrainedColumn) obj;
+        SegmentColumn that = (SegmentColumn) obj;
         if (this.values == null && that.values == null) {
             return true;
         }
@@ -113,4 +115,4 @@ public class ConstrainedColumn implements Serializable {
         return hashCode;
     }
 }
-// End ConstrainedColumn.java
+// End SegmentColumn.java

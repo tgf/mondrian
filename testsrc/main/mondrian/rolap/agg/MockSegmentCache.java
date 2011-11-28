@@ -10,7 +10,7 @@
 package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentCache;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.CompletedFuture;
@@ -64,7 +64,7 @@ public class MockSegmentCache implements SegmentCache {
             byte[] pickled = out.toByteArray();
             InputStream in = new ByteArrayInputStream(pickled);
             ObjectInputStream ois = new ObjectInputStream(in);
-            ConstrainedColumn o = (ConstrainedColumn) ois.readObject();
+            SegmentColumn o = (SegmentColumn) ois.readObject();
             Util.discard(o);
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -47,8 +47,8 @@ import java.util.*;
 public class SegmentHeader implements Serializable {
     private static final long serialVersionUID = 8696439182886512850L;
     private final int arity;
-    private final ConstrainedColumn[] constrainedColumns;
-    private final ConstrainedColumn[] excludedRegions;
+    private final SegmentColumn[] constrainedColumns;
+    private final SegmentColumn[] excludedRegions;
     public final String[] compoundPredicates;
     public final String measureName;
     public final String cubeName;
@@ -76,7 +76,7 @@ public class SegmentHeader implements Serializable {
         ByteString schemaChecksum,
         String cubeName,
         String measureName,
-        ConstrainedColumn[] constrainedColumns,
+        SegmentColumn[] constrainedColumns,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey)
     {
@@ -102,7 +102,7 @@ public class SegmentHeader implements Serializable {
         ByteString schemaChecksum,
         String cubeName,
         String measureName,
-        ConstrainedColumn[] constrainedColumns,
+        SegmentColumn[] constrainedColumns,
         String[] compoundPredicates,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey)
@@ -110,7 +110,7 @@ public class SegmentHeader implements Serializable {
         this(
             schemaName, schemaChecksum, cubeName, measureName,
             constrainedColumns, compoundPredicates, rolapStarFactTableName,
-            constrainedColsBitKey, new ConstrainedColumn[0]);
+            constrainedColsBitKey, new SegmentColumn[0]);
     }
 
     /**
@@ -129,11 +129,11 @@ public class SegmentHeader implements Serializable {
         ByteString schemaChecksum,
         String cubeName,
         String measureName,
-        ConstrainedColumn[] constrainedColumns,
+        SegmentColumn[] constrainedColumns,
         String[] compoundPredicates,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        ConstrainedColumn[] excludedRegions)
+        SegmentColumn[] excludedRegions)
     {
         this.constrainedColumns = constrainedColumns;
         this.excludedRegions = excludedRegions;
@@ -153,13 +153,13 @@ public class SegmentHeader implements Serializable {
         hash = Util.hash(hash, schemaChecksum);
         hash = Util.hash(hash, cubeName);
         hash = Util.hash(hash, measureName);
-        for (ConstrainedColumn col : this.constrainedColumns) {
+        for (SegmentColumn col : this.constrainedColumns) {
             hash = Util.hash(hash, col.columnExpression);
             if (col.values != null) {
                 hash = Util.hashArray(hash, col.values.toArray());
             }
         }
-        for (ConstrainedColumn col : this.excludedRegions) {
+        for (SegmentColumn col : this.excludedRegions) {
             hash = Util.hash(hash, col.columnExpression);
             if (col.values != null) {
                 hash = Util.hashArray(hash, col.values.toArray());
@@ -192,13 +192,13 @@ public class SegmentHeader implements Serializable {
      * replace or add to the original header.
      * @return A clone of the header with the columns replaced.
      */
-    public SegmentHeader clone(ConstrainedColumn[] overrideValues) {
-        Map<String, ConstrainedColumn> colsToAdd =
-            new HashMap<String, ConstrainedColumn>();
-        for (ConstrainedColumn cc : this.constrainedColumns) {
+    public SegmentHeader clone(SegmentColumn[] overrideValues) {
+        Map<String, SegmentColumn> colsToAdd =
+            new HashMap<String, SegmentColumn>();
+        for (SegmentColumn cc : this.constrainedColumns) {
             colsToAdd.put(cc.columnExpression, cc);
         }
-        for (ConstrainedColumn override : overrideValues) {
+        for (SegmentColumn override : overrideValues) {
             colsToAdd.put(override.columnExpression, override);
         }
         return
@@ -208,7 +208,7 @@ public class SegmentHeader implements Serializable {
                 cubeName,
                 measureName,
                 colsToAdd.values()
-                    .toArray(new ConstrainedColumn[colsToAdd.size()]),
+                    .toArray(new SegmentColumn[colsToAdd.size()]),
                 rolapStarFactTableName,
                 constrainedColsBitKey);
     }
@@ -223,13 +223,13 @@ public class SegmentHeader implements Serializable {
      * of this header. This means that when performing a flush operation,
      * the header must be scrapped altogether.
      */
-    public boolean canConstrain(ConstrainedColumn[] region) {
+    public boolean canConstrain(SegmentColumn[] region) {
         boolean atLeastOnePresent = false;
-        for (ConstrainedColumn ccToFlush : region) {
-            ConstrainedColumn ccActual =
+        for (SegmentColumn ccToFlush : region) {
+            SegmentColumn ccActual =
                 getConstrainedColumn(ccToFlush.columnExpression);
             if (ccActual != null) {
-                final ConstrainedColumn ccActualExcl =
+                final SegmentColumn ccActualExcl =
                     getExcludedRegion(ccToFlush.columnExpression);
                 if ((ccActualExcl != null
                     && ccActualExcl.merge(ccToFlush).values == null)
@@ -254,16 +254,16 @@ public class SegmentHeader implements Serializable {
      * @param region
      * @return
      */
-    public SegmentHeader constrain(ConstrainedColumn[] region) {
-        final Map<String, ConstrainedColumn> newRegions =
-            new HashMap<String, ConstrainedColumn>();
+    public SegmentHeader constrain(SegmentColumn[] region) {
+        final Map<String, SegmentColumn> newRegions =
+            new HashMap<String, SegmentColumn>();
         for (int i = 0; i < this.excludedRegions.length; i++) {
             newRegions.put(
                 this.excludedRegions[i].columnExpression,
                 this.excludedRegions[i]);
         }
         for (int i = 0; i < region.length; i++) {
-            ConstrainedColumn col = region[i];
+            SegmentColumn col = region[i];
             if (getConstrainedColumn(col.columnExpression) == null) {
                 continue;
             }
@@ -290,7 +290,7 @@ public class SegmentHeader implements Serializable {
                 rolapStarFactTableName,
                 constrainedColsBitKey,
                 newRegions.values().toArray(
-                    new ConstrainedColumn[newRegions.size()]));
+                    new SegmentColumn[newRegions.size()]));
     }
 
     public String toString() {
@@ -305,9 +305,9 @@ public class SegmentHeader implements Serializable {
         return arity;
     }
 
-    public ConstrainedColumn[] getExcludedRegions() {
-        ConstrainedColumn[] copy =
-            new ConstrainedColumn[this.excludedRegions.length];
+    public SegmentColumn[] getExcludedRegions() {
+        SegmentColumn[] copy =
+            new SegmentColumn[this.excludedRegions.length];
         System.arraycopy(
             excludedRegions,
             0,
@@ -322,9 +322,9 @@ public class SegmentHeader implements Serializable {
      * header. The caller should consider this list immutable.
      * @return An array of ConstrainedColumns
      */
-    public ConstrainedColumn[] getConstrainedColumns() {
-        ConstrainedColumn[] copy =
-            new ConstrainedColumn[this.constrainedColumns.length];
+    public SegmentColumn[] getConstrainedColumns() {
+        SegmentColumn[] copy =
+            new SegmentColumn[this.constrainedColumns.length];
         System.arraycopy(
             constrainedColumns,
             0,
@@ -340,10 +340,10 @@ public class SegmentHeader implements Serializable {
      * @param columnExpression The column name we want.
      * @return A Constrained column, or null.
      */
-    public ConstrainedColumn getConstrainedColumn(
+    public SegmentColumn getConstrainedColumn(
         String columnExpression)
     {
-        for (ConstrainedColumn c : constrainedColumns) {
+        for (SegmentColumn c : constrainedColumns) {
             if (c.columnExpression.equals(columnExpression)) {
                 return c;
             }
@@ -351,10 +351,10 @@ public class SegmentHeader implements Serializable {
         return null;
     }
 
-    public ConstrainedColumn getExcludedRegion(
+    public SegmentColumn getExcludedRegion(
         String columnExpression)
     {
-        for (ConstrainedColumn c : excludedRegions) {
+        for (SegmentColumn c : excludedRegions) {
             if (c.columnExpression.equals(columnExpression)) {
                 return c;
             }
@@ -381,7 +381,7 @@ public class SegmentHeader implements Serializable {
             hashSB.append(this.schemaChecksum);
             hashSB.append(this.cubeName);
             hashSB.append(this.measureName);
-            for (ConstrainedColumn c : constrainedColumns) {
+            for (SegmentColumn c : constrainedColumns) {
                 hashSB.append(c.columnExpression);
                 if (c.values != null) {
                     for (Object value : c.values) {
@@ -389,7 +389,7 @@ public class SegmentHeader implements Serializable {
                     }
                 }
             }
-            for (ConstrainedColumn c : excludedRegions) {
+            for (SegmentColumn c : excludedRegions) {
                 hashSB.append(c.columnExpression);
                 if (c.values != null) {
                     for (Object value : c.values) {
@@ -425,7 +425,7 @@ public class SegmentHeader implements Serializable {
             descriptionSB.append(this.measureName);
             descriptionSB.append("]\n");
             descriptionSB.append("Axes:[");
-            for (ConstrainedColumn c : constrainedColumns) {
+            for (SegmentColumn c : constrainedColumns) {
                 descriptionSB.append("\n\t{");
                 descriptionSB.append(c.columnExpression);
                 descriptionSB.append("=(");
@@ -443,7 +443,7 @@ public class SegmentHeader implements Serializable {
             }
             descriptionSB.append("]\n");
             descriptionSB.append("Excluded Regions:[");
-            for (ConstrainedColumn c : excludedRegions) {
+            for (SegmentColumn c : excludedRegions) {
                 descriptionSB.append("\n\t{");
                 descriptionSB.append(c.columnExpression);
                 descriptionSB.append("=(");

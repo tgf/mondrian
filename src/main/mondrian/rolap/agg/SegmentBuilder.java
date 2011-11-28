@@ -17,7 +17,7 @@ import mondrian.rolap.StarColumnPredicate;
 import mondrian.rolap.StarPredicate;
 import mondrian.rolap.agg.Segment.ExcludedRegion;
 import mondrian.rolap.sql.SqlQuery;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.ArraySortedSet;
 
@@ -135,7 +135,7 @@ public class SegmentBuilder {
         public ExcludedRegionList(SegmentHeader header) {
             this.header = header;
             int cellCount = 1;
-            for (ConstrainedColumn cc : header.getExcludedRegions()) {
+            for (SegmentColumn cc : header.getExcludedRegions()) {
                 // TODO find a way to approximate the cardinality
                 // of wildcard columns.
                 if (cc.values != null) {
@@ -156,7 +156,7 @@ public class SegmentBuilder {
         public boolean wouldContain(Object[] keys) {
             assert keys.length == header.getConstrainedColumns().length;
             for (int i = 0; i < keys.length; i++) {
-                final ConstrainedColumn excl =
+                final SegmentColumn excl =
                     header.getExcludedRegion(
                         header.getConstrainedColumns()[i].columnExpression);
                 if (excl == null) {
@@ -211,18 +211,18 @@ public class SegmentBuilder {
         return false;
     }
 
-    public static ConstrainedColumn[] toConstrainedColumns(
+    public static SegmentColumn[] toConstrainedColumns(
         StarColumnPredicate[] predicates)
     {
         return toConstrainedColumns(
             Arrays.asList(predicates));
     }
 
-    public static ConstrainedColumn[] toConstrainedColumns(
+    public static SegmentColumn[] toConstrainedColumns(
         Collection<StarColumnPredicate> predicates)
     {
-        List<ConstrainedColumn> ccs =
-            new ArrayList<ConstrainedColumn>();
+        List<SegmentColumn> ccs =
+            new ArrayList<SegmentColumn>();
         for (StarColumnPredicate predicate : predicates) {
             final List<Comparable<?>> values =
                 new ArrayList<Comparable<?>>();
@@ -231,7 +231,7 @@ public class SegmentBuilder {
                 values.toArray(new Comparable<?>[values.size()]);
             if (valuesArray.length == 1 && valuesArray[0].equals(true)) {
                 ccs.add(
-                    new ConstrainedColumn(
+                    new SegmentColumn(
                         predicate.getConstrainedColumn()
                             .getExpression().getGenericExpression(),
                         null));
@@ -240,13 +240,13 @@ public class SegmentBuilder {
                     valuesArray,
                     Util.SqlNullSafeComparator.instance);
                 ccs.add(
-                    new ConstrainedColumn(
+                    new SegmentColumn(
                         predicate.getConstrainedColumn()
                         .getExpression().getGenericExpression(),
                         new ArraySortedSet(valuesArray)));
             }
         }
-        return ccs.toArray(new ConstrainedColumn[ccs.size()]);
+        return ccs.toArray(new SegmentColumn[ccs.size()]);
     }
 
     /**
@@ -258,7 +258,7 @@ public class SegmentBuilder {
      * @return A SegmentHeader describing the supplied Segment object.
      */
     public static SegmentHeader toHeader(Segment segment) {
-        final ConstrainedColumn[] cc =
+        final SegmentColumn[] cc =
             SegmentBuilder.toConstrainedColumns(segment.predicates);
         final List<String> cp = new ArrayList<String>();
 

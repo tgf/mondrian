@@ -476,7 +476,7 @@ public class SegmentCacheManager {
                 new ArrayList<SegmentHeader>();
             final List<Member> measures =
                 CacheControlImpl.findMeasures(region);
-            final ConstrainedColumn[] flushRegion =
+            final SegmentColumn[] flushRegion =
                 CacheControlImpl.findAxisValues(region);
 
             for (Member member : measures) {

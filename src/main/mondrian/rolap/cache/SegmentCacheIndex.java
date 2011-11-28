@@ -10,7 +10,7 @@
 package mondrian.rolap.cache;
 
 import mondrian.rolap.BitKey;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.ByteString;
 
@@ -45,7 +45,7 @@ public interface SegmentCacheIndex {
         String cubeName,
         String measureName,
         String rolapStarFactTableName,
-        ConstrainedColumn[] region);
+        SegmentColumn[] region);
 
     /**
      * Adds a header to the index.

@@ -15,7 +15,7 @@ import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.server.Locus;
 import mondrian.server.monitor.SqlStatementEvent;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.*;
 
@@ -849,10 +849,10 @@ public class SegmentLoader {
      */
     abstract class SegmentRollupWrapper {
         abstract BitKey getConstrainedColumnsBitKey();
-        abstract ConstrainedColumn[] getConstrainedColumns();
+        abstract SegmentColumn[] getConstrainedColumns();
         abstract SegmentDataset getDataset();
-        abstract Object[] getValuesForColumn(ConstrainedColumn cc);
-        abstract mondrian.spi.ConstrainedColumn getHeader();
+        abstract Object[] getValuesForColumn(SegmentColumn cc);
+        abstract mondrian.spi.SegmentColumn getHeader();
         public int hashCode() {
             return getHeader().hashCode();
         }

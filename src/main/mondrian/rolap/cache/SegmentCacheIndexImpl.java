@@ -11,7 +11,7 @@ package mondrian.rolap.cache;
 
 import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.ByteString;
 
@@ -122,7 +122,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         }
         for (Map.Entry<String, Comparable<?>> entry : coords.entrySet()) {
             // Check if the segment explicitly excludes this coordinate.
-            final ConstrainedColumn excludedColumn =
+            final SegmentColumn excludedColumn =
                 header.getExcludedRegion(entry.getKey());
             if (excludedColumn != null) {
                 final SortedSet<Comparable<?>> values =
@@ -133,7 +133,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             }
             // Check if the dimensionality of the segment intersects
             // with the coordinate.
-            final ConstrainedColumn constrainedColumn =
+            final SegmentColumn constrainedColumn =
                 header.getConstrainedColumn(entry.getKey());
             if (constrainedColumn == null) {
                 throw Util.newInternal(
@@ -158,7 +158,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String cubeName,
         String measureName,
         String rolapStarFactTableName,
-        ConstrainedColumn[] region)
+        SegmentColumn[] region)
     {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
@@ -191,7 +191,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String cubeName,
         String measureName,
         String rolapStarFactTableName,
-        ConstrainedColumn[] region)
+        SegmentColumn[] region)
     {
         // most selective condition first
         if (!header.schemaName.equals(schemaName)) {
@@ -212,8 +212,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         if (region.length == 0) {
             return true;
         }
-        for (ConstrainedColumn regionColumn : region) {
-            final ConstrainedColumn headerColumn =
+        for (SegmentColumn regionColumn : region) {
+            final SegmentColumn headerColumn =
                 header.getConstrainedColumn(regionColumn.getColumnExpression());
             if (headerColumn == null) {
                 /*

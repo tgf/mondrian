@@ -17,7 +17,7 @@ import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.rolap.sql.MemberChildrenConstraint;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
-import mondrian.spi.ConstrainedColumn;
+import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.ArraySortedSet;
 
@@ -429,9 +429,9 @@ public class CacheControlImpl implements CacheControl {
         return list;
     }
 
-    public static ConstrainedColumn[] findAxisValues(CellRegion region) {
-        final List<ConstrainedColumn> list =
-            new ArrayList<ConstrainedColumn>();
+    public static SegmentColumn[] findAxisValues(CellRegion region) {
+        final List<SegmentColumn> list =
+            new ArrayList<SegmentColumn>();
         final CellRegionVisitor visitor =
             new CellRegionVisitorImpl() {
                 public void visit(MemberCellRegion region) {
@@ -459,7 +459,7 @@ public class CacheControlImpl implements CacheControl {
                                 new Comparable<?>[entry.getValue().size()]);
                         if (keys.length == 1 && keys[0].equals(true)) {
                             list.add(
-                                new ConstrainedColumn(
+                                new SegmentColumn(
                                     entry.getKey(),
                                     null));
                         } else {
@@ -467,7 +467,7 @@ public class CacheControlImpl implements CacheControl {
                                 keys,
                                 Util.SqlNullSafeComparator.instance);
                             list.add(
-                                new ConstrainedColumn(
+                                new SegmentColumn(
                                     entry.getKey(),
                                     new ArraySortedSet(keys)));
                         }
@@ -478,13 +478,13 @@ public class CacheControlImpl implements CacheControl {
                     // FIXME Optimize this by resolving the list of members
                     // into an actual list of values for ConstrainedColumn
                     list.add(
-                        new ConstrainedColumn(
+                        new SegmentColumn(
                             region.level.getKeyExp().getGenericExpression(),
                             null));
                 }
             };
         ((CellRegionImpl) region).accept(visitor);
-        return list.toArray(new ConstrainedColumn[list.size()]);
+        return list.toArray(new SegmentColumn[list.size()]);
     }
 
     public static List<RolapStar> getStarList(CellRegion region) {
