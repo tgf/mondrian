@@ -10,9 +10,7 @@
 package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
-import mondrian.spi.SegmentColumn;
-import mondrian.spi.SegmentCache;
-import mondrian.spi.SegmentHeader;
+import mondrian.spi.*;
 import mondrian.util.CompletedFuture;
 
 import java.io.*;

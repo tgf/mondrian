@@ -11,7 +11,6 @@
 package mondrian.spi;
 
 import mondrian.olap.MondrianProperties;
-import mondrian.rolap.agg.SegmentBody;
 import mondrian.spi.SegmentCache.SegmentCacheListener.SegmentCacheEvent;
 import mondrian.spi.SegmentHeader;
 

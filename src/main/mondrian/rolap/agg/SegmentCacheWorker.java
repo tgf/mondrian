@@ -11,8 +11,7 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.MondrianProperties;
 import mondrian.resource.MondrianResource;
-import mondrian.spi.SegmentCache;
-import mondrian.spi.SegmentHeader;
+import mondrian.spi.*;
 import mondrian.util.ServiceDiscovery;
 
 import org.apache.log4j.Logger;

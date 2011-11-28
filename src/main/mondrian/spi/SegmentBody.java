@@ -7,10 +7,14 @@
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
-package mondrian.rolap.agg;
+package mondrian.spi;
 
 import java.io.Serializable;
 import java.util.SortedSet;
+
+import mondrian.rolap.agg.Segment;
+import mondrian.rolap.agg.SegmentAxis;
+import mondrian.rolap.agg.SegmentDataset;
 
 /**
  * SegmentBody is the object which contains the cached data of a

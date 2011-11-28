@@ -14,6 +14,7 @@ package mondrian.rolap.agg;
 
 import mondrian.rolap.CellKey;
 import mondrian.rolap.SqlStatement;
+import mondrian.spi.SegmentBody;
 import mondrian.util.Pair;
 
 import java.util.*;

@@ -17,8 +17,7 @@ import mondrian.rolap.StarColumnPredicate;
 import mondrian.rolap.StarPredicate;
 import mondrian.rolap.agg.Segment.ExcludedRegion;
 import mondrian.rolap.sql.SqlQuery;
-import mondrian.spi.SegmentColumn;
-import mondrian.spi.SegmentHeader;
+import mondrian.spi.*;
 import mondrian.util.ArraySortedSet;
 
 import java.util.AbstractList;

@@ -15,8 +15,7 @@ import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.server.Locus;
 import mondrian.server.monitor.SqlStatementEvent;
-import mondrian.spi.SegmentColumn;
-import mondrian.spi.SegmentHeader;
+import mondrian.spi.*;
 import mondrian.util.*;
 
 import org.apache.log4j.Logger;

@@ -15,8 +15,7 @@ import mondrian.rolap.aggmatcher.AggGen;
 import mondrian.rolap.aggmatcher.AggStar;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
-import mondrian.spi.Dialect;
-import mondrian.spi.SegmentHeader;
+import mondrian.spi.*;
 import mondrian.util.*;
 
 import org.apache.log4j.Logger;

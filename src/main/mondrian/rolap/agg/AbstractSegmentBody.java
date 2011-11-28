@@ -9,6 +9,7 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.spi.SegmentBody;
 import mondrian.util.Pair;
 
 import java.util.List;
