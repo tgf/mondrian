@@ -106,16 +106,29 @@ public class FastBatchingCellReader implements CellReader {
         // contains it.
         final Object o = aggMgr.getCellFromCache(request, pinnedSegments);
 
-        if (o == Boolean.TRUE) {
-            // Aggregation is being loaded. (todo: Use better value, or
-            // throw special exception)
-            ++pendingCount;
-            return RolapUtil.valueNotReadyException;
-        }
+        assert o != Boolean.TRUE : "getCellFromCache no longer returns TRUE";
         if (o != null) {
             ++hitCount;
             return o;
         }
+
+        // If this query has not had any cache misses, it's worth doing a
+        // synchronous request for the cell segment. If it is in the cache, it
+        // will be worth the wait, because we can avoid the effort of batching
+        // up requests that could have been satisfied by the same segment.
+        if (missCount == 0) {
+            SegmentWithData segmentWithData = peek(request);
+            if (segmentWithData != null) {
+                segmentWithData.getStar().register(segmentWithData);
+                final Object o2 =
+                    aggMgr.getCellFromCache(request, pinnedSegments);
+                if (o2 != null) {
+                    ++hitCount;
+                    return o2;
+                }
+            }
+        }
+
         // if there is no such cell, record that we need to fetch it, and
         // return 'error'
         recordCellRequest(request);
@@ -135,9 +148,7 @@ public class FastBatchingCellReader implements CellReader {
     }
 
     public final void recordCellRequest(CellRequest request) {
-        if (request.isUnsatisfiable()) {
-            return;
-        }
+        assert !request.isUnsatisfiable();
         ++missCount;
         cellRequests.add(request);
         if (cellRequests.size() % 5000 == 0) {
@@ -211,6 +222,10 @@ public class FastBatchingCellReader implements CellReader {
 
     /**
      * Locates a segment that actually exists.
+     *
+     * <p>FIXME: Calls {@link SegmentCacheWorker#get}, and that's a slow
+     * blocking call. Make sure that this method is not called from an
+     * agent.</p>
      *
      * @param request Cell request
      * @param map Column values
@@ -497,6 +512,60 @@ public class FastBatchingCellReader implements CellReader {
      */
     void setDirty(boolean dirty) {
         this.dirty = dirty;
+    }
+
+    /**
+     * Makes a quick request to the aggregation manager to see whether the
+     * cell value required by a particular cell request is in external cache.
+     *
+     * <p>'Quick' is relative. It is an asynchronous request (due to
+     * the aggregation manager being an actor) and therefore somewhat slow. If
+     * the segment is in cache, will save batching up future requests and
+     * re-executing the query. Win should be particularly noticeable for queries
+     * running on a populated cache. Without this feature, every query would
+     * require at least two iterations.</p>
+     *
+     * <p>Client is responsible for adding the segment to its private cache.</p>
+     *
+     *
+     * @param request Cell request
+     * @return Segment with data, or null if not in cache
+     */
+    private SegmentWithData peek(final CellRequest request) {
+        final Locus locus = Locus.peek();
+        final AggregationKey key = new AggregationKey(request);
+        Pair<SegmentHeader, SegmentBody> headerBody = aggMgr.cacheMgr.execute(
+            new SegmentCacheManager.Command<Pair<SegmentHeader,
+                SegmentBody>>() {
+                public Pair<SegmentHeader, SegmentBody> call()
+                    throws Exception
+                {
+                    Locus.push(locus);
+                    try {
+                        return locateHeaderBody(
+                            request,
+                            request.getMappedCellValues(),
+                            key);
+                    } finally {
+                        Locus.pop(locus);
+                    }
+                }
+            }
+        );
+        if (headerBody == null) {
+            return null;
+        }
+        final SegmentHeader header = headerBody.left;
+        final SegmentBody body = headerBody.right;
+        Segment segment =
+            SegmentBuilder.toSegment(
+                header,
+                request.getMeasure().getStar(),
+                request.getConstrainedColumnsBitKey(),
+                request.getConstrainedColumns(),
+                request.getMeasure(),
+                key.getCompoundPredicateList());
+        return SegmentBuilder.addData(segment, body);
     }
 
     /**

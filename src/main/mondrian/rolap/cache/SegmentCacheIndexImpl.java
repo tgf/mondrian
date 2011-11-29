@@ -26,8 +26,11 @@ import java.util.*;
  * @author Julian Hyde
  */
 public class SegmentCacheIndexImpl implements SegmentCacheIndex {
-    private final List<SegmentHeader> headerList =
-        new ArrayList<SegmentHeader>();
+    private final Map<List, List<SegmentHeader>> bitkeyMap =
+        new HashMap<List, List<SegmentHeader>>();
+    private final Map<List, List<SegmentHeader>> factMap =
+        new HashMap<List, List<SegmentHeader>>();
+
     private final Thread thread;
 
     /**
@@ -52,18 +55,20 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
         List<SegmentHeader> list = Collections.emptyList();
+        final List starKey =
+            makeBitkeyKey(
+                schemaName,
+                schemaChecksum,
+                cubeName,
+                rolapStarFactTableName,
+                constrainedColsBitKey,
+                measureName);
+        final List<SegmentHeader> headerList = bitkeyMap.get(starKey);
+        if (headerList == null) {
+            return Collections.emptyList();
+        }
         for (SegmentHeader header : headerList) {
-            if (matches(
-                    header,
-                    schemaName,
-                    schemaChecksum,
-                    cubeName,
-                    measureName,
-                    rolapStarFactTableName,
-                    constrainedColsBitKey,
-                    coords,
-                    compoundPredicates))
-            {
+            if (matches(header, coords, compoundPredicates)) {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
                 if (list.isEmpty()) {
@@ -78,45 +83,36 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     public void add(SegmentHeader header) {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
+        final List bitkeyKey = makeBitkeyKey(header);
+        List<SegmentHeader> headerList = bitkeyMap.get(bitkeyKey);
+        if (headerList == null) {
+            headerList = new ArrayList<SegmentHeader>();
+            bitkeyMap.put(bitkeyKey, headerList);
+        }
         headerList.add(header);
+
+        final List factKey = makeFactKey(header);
+        List<SegmentHeader> headerList2 = bitkeyMap.get(factKey);
+        if (headerList2 == null) {
+            headerList2 = new ArrayList<SegmentHeader>();
+            factMap.put(factKey, headerList2);
+        }
+        headerList2.add(header);
     }
 
     public void remove(SegmentHeader header) {
-        headerList.remove(header);
+        final List bitkeyKey = makeBitkeyKey(header);
+        final List<SegmentHeader> headerList = bitkeyMap.get(bitkeyKey);
+        if (headerList != null) {
+            headerList.remove(header);
+        }
     }
 
     private boolean matches(
         SegmentHeader header,
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
         Map<String, Comparable<?>> coords,
         String[] compoundPredicates)
     {
-        // most selective condition first
-        if (!header.getConstrainedColumnsBitKey()
-            .equals(constrainedColsBitKey))
-        {
-            return false;
-        }
-        if (!header.schemaName.equals(schemaName)) {
-            return false;
-        }
-        if (!Util.equals(header.schemaChecksum, schemaChecksum)) {
-            return false;
-        }
-        if (!header.cubeName.equals(cubeName)) {
-            return false;
-        }
-        if (!header.measureName.equals(measureName)) {
-            return false;
-        }
-        if (!header.rolapStarFactTableName.equals(rolapStarFactTableName)) {
-            return false;
-        }
         if (!Arrays.equals(header.compoundPredicates, compoundPredicates)) {
             return false;
         }
@@ -162,17 +158,19 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
+        final List factKey = makeFactKey(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName);
+        final List<SegmentHeader> headerList = factMap.get(factKey);
+        if (headerList == null) {
+            return Collections.emptyList();
+        }
         List<SegmentHeader> list = Collections.emptyList();
         for (SegmentHeader header : headerList) {
-            if (intersects(
-                    header,
-                    schemaName,
-                    schemaChecksum,
-                    cubeName,
-                    measureName,
-                    rolapStarFactTableName,
-                    region))
-            {
+            if (intersects(header, region)) {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
                 if (list.isEmpty()) {
@@ -186,29 +184,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
 
     private boolean intersects(
         SegmentHeader header,
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
         SegmentColumn[] region)
     {
         // most selective condition first
-        if (!header.schemaName.equals(schemaName)) {
-            return false;
-        }
-        if (!Util.equals(header.schemaChecksum, schemaChecksum)) {
-            return false;
-        }
-        if (!header.cubeName.equals(cubeName)) {
-            return false;
-        }
-        if (!header.measureName.equals(measureName)) {
-            return false;
-        }
-        if (!header.rolapStarFactTableName.equals(rolapStarFactTableName)) {
-            return false;
-        }
         if (region.length == 0) {
             return true;
         }
@@ -228,9 +206,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             final SortedSet<Comparable<?>> headerValues =
                 regionColumn.getValues();
             if (headerValues == null || regionValues == null) {
-                /*
-                 * This is a wildcard, so it always intersects.
-                 */
+                // This is a wildcard, so it always intersects.
                 return true;
             }
             for (Comparable<?> myValue : regionValues) {
@@ -243,7 +219,58 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     }
 
     public List<SegmentHeader> getAllHeaders() {
-        return Collections.unmodifiableList(headerList);
+        return Collections.emptyList();
+    }
+
+    private List makeBitkeyKey(SegmentHeader header) {
+        return makeBitkeyKey(
+            header.schemaName,
+            header.schemaChecksum,
+            header.cubeName,
+            header.rolapStarFactTableName,
+            header.constrainedColsBitKey,
+            header.measureName);
+    }
+
+    private List makeBitkeyKey(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String rolapStarFactTableName,
+        BitKey constrainedColsBitKey,
+        String measureName)
+    {
+        return Arrays.asList(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            constrainedColsBitKey,
+            measureName);
+    }
+
+    private List makeFactKey(SegmentHeader header) {
+        return makeFactKey(
+            header.schemaName,
+            header.schemaChecksum,
+            header.cubeName,
+            header.rolapStarFactTableName,
+            header.measureName);
+    }
+
+    private List makeFactKey(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String rolapStarFactTableName,
+        String measureName)
+    {
+        return Arrays.asList(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName);
     }
 }
 

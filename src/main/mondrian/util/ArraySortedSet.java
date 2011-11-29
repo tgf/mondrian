@@ -158,8 +158,16 @@ public class ArraySortedSet<E extends Comparable<E>>
 
     /**
      * Performs a merge between two {@link ArraySortedSet} instances
-     * in O(n) time, returning a third instance which doesn't include
+     * in O(n) time, returning a third instance that doesn't include
      * duplicates.
+     *
+     * <p>For example,
+     * <tt>ArraySortedSet("a", "b", "c").merge(ArraySortedSet("a", "c",
+     * "e"))</tt> returns
+     * <tt>ArraySortedSet("a", "b", "c", "e")}</tt>.</p>
+     *
+     * @param arrayToMerge Other set to combine with this
+     * @return Set containing union of the elements of inputs
      */
     public ArraySortedSet<E> merge(
         ArraySortedSet<E> arrayToMerge)
@@ -178,12 +186,11 @@ public class ArraySortedSet<E extends Comparable<E>>
 
         final E[] data1 = this.values;
         final E[] data2 = arrayToMerge.values;
+        @SuppressWarnings({"unchecked"})
         E[] merged =
-            (E[])
-                Util.genericArray(
-                    this.values[0].getClass(),
-                    k);
-
+            Util.genericArray(
+                (Class<E>) this.values[0].getClass(),
+                k);
 
         while (p1 < data1.length && p2 < data2.length) {
             final int compare =
@@ -206,11 +213,9 @@ public class ArraySortedSet<E extends Comparable<E>>
             merged[m++] = data2[p2++];
         }
 
-        if (m < k) {
-            return new ArraySortedSet<E>(merged, 0, m);
-        } else {
-            return new ArraySortedSet<E>(merged);
-        }
+        // Note that m < k if there were duplicates. Result has fewer elements
+        // than sum of inputs. But it's not worth truncating the array.
+        return new ArraySortedSet<E>(merged, 0, m);
     }
 
     @Override

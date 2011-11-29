@@ -579,10 +579,12 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
         final Set<Node<E>> seen = new HashSet<Node<E>>();
         final List<E> list = new ArrayList<E>();
         while (!deque.isEmpty()) {
-            Node<E> child = deque.pop();
-            if (child.e != null && seen.add(child)) {
-                list.add(child.e);
-                deque.addAll(up ? child.childList : child.parentList);
+            Node<E> node1 = deque.pop();
+            list.add(node1.e);
+            for (Node<E> child : up ? node1.childList : node1.parentList) {
+                if (child.e != null && seen.add(child)) {
+                    deque.add(child);
+                }
             }
         }
         return list;
@@ -590,6 +592,11 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
 
     /**
      * Holds a value, its parent nodes, and child nodes.
+     *
+     * <p>We deliberately do not override {@link #hashCode} or
+     * {@link #equals(Object)}. A canonizing map ensures that within a
+     * given PartiallyOrderedSet, two nodes are identical if and only if they
+     * contain the same value.</p>
      *
      * @param <E> Element type
      */

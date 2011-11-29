@@ -46,8 +46,6 @@ import java.util.concurrent.*;
  * and {@link mondrian.rolap.RolapStar}.lookupAggregationShared
  * (formerly RolapStar.lookupAggregation).</p>
  *
- * <p>4. {@link Aggregation#flush}
- * is now static, can be moved somewhere else</p>
  *
  *
  *
@@ -108,6 +106,9 @@ import java.util.concurrent.*;
  *
  * </ul>
  *
+ * <p>13. Fix flush. Obsolete {@link Aggregation}.flush, and
+ * {@link RolapStar}.flush, which called it.</p>
+ *
  *
  * <h2>Done but not checked in</h2>
  *
@@ -126,7 +127,7 @@ import java.util.concurrent.*;
  * <p>5. Move SegmentHeader, SegmentBody, ConstrainedColumn into
  * mondrian.spi. Leave behind dependencies on mondrian.rolap.agg. In particular,
  * put code that converts Segment + SegmentWithData to and from SegmentHeader
- * + SegmentBody (e.g. {@link SegmentHeader#forSegment}) into a utility class.
+ * + SegmentBody (e.g. {@link SegmentHeader}#forSegment) into a utility class.
  * (Do this as CLEANUP, after functionality is complete?)</p>
  *
  * <p>7. RolapStar.localAggregations and .sharedAggregations. Obsolete
@@ -188,16 +189,13 @@ import java.util.concurrent.*;
  *
  * </ol>
  *
- * <p>13. Call {@link Aggregation#flush}. Not currently called. Was called
- * from {@link RolapStar#flush}.</p>
- *
  * <p>14. Move {@link AggregationManager#getCellFromCache} somewhere else.
  *   It's concerned with local segments, not the global/external cache.</p>
  *
  * <p>15. Method to convert SegmentHeader + SegmentBody to Segment +
  * SegmentWithData is imperfect. Cannot parse predicates, compound predicates.
  * Need mapping in star to do it properly and efficiently?
- * See {@link SegmentHeader#toSegment}.</p>
+ * See {@link SegmentBuilder#toSegment}.</p>
  *
  * <p>17. Revisit the strategy for finding segments that can be copied from
  * global and external cache into local cache. The strategy of sending N
@@ -208,6 +206,16 @@ import java.util.concurrent.*;
  * size?), identify those that can be answered from global or external cache,
  * return those segments, but not execute SQL until the end of the phase.
  * If so, {@link CellRequestQuantumExceededException} be obsoleted.</p>
+ *
+ * <p>18. {@link FastBatchingCellReader#locateHeaderBody} (and maybe other
+ * methods) call {@link SegmentCacheWorker#get}, and that's a slow blocking
+ * call. Make waits for segment futures should be called from a worker or
+ * client, not an agent.</p>
+ *
+ * <p>19. Tracing.
+ * a. Remove or repurpose {@link FastBatchingCellReader#pendingCount};
+ * b. Add counter to measure requests satisfied by calling
+ * {@link FastBatchingCellReader#peek}.</p>
  *
  *
  * <h2>Segment lifecycle</h2>
@@ -319,7 +327,6 @@ public class SegmentCacheManager {
      *
      * @param aggMgr Aggregate manager
      * @param header segment header
-     * @param body segment body
      */
     public void remove(
         AggregationManager aggMgr,
@@ -335,10 +342,11 @@ public class SegmentCacheManager {
         CacheControl cacheControl,
         CacheControl.CellRegion region)
     {
-        execute(new FlushCommand(
-            aggMan,
-            region,
-            (CacheControlImpl)cacheControl));
+        execute(
+            new FlushCommand(
+                aggMan,
+                region,
+                (CacheControlImpl) cacheControl));
     }
 
     /**
