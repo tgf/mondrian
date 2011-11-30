@@ -1222,6 +1222,20 @@ public class UtilTestCase extends TestCase {
         assertEquals("[]", abceSet.subSet("e", "c").toString());
         assertFalse(abceSet.subSet("z", "c").equals(subsetStart));
         assertEquals("[]", abceSet.subSet("z", "c").toString());
+
+        // merge
+        final ArraySortedSet<String> ar1 = new ArraySortedSet<String>(abce);
+        final ArraySortedSet<String> ar2 =
+            new ArraySortedSet<String>(
+                new String[] {"d"});
+        final ArraySortedSet<String> ar3 =
+            new ArraySortedSet<String>(
+                new String[] {"b", "c"});
+        checkToString("[a, b, c, e]", ar1);
+        checkToString("[d]", ar2);
+        checkToString("[b, c]", ar3);
+        checkToString("[a, b, c, d, e]", ar1.merge(ar2));
+        checkToString("[a, b, c, e]", ar1.merge(ar3));
     }
 
     private void checkToString(String expected, Set<String> set) {

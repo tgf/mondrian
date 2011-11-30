@@ -1275,11 +1275,11 @@ public class BasicQueryTest extends FoodMartTestCase {
         assertSize(
             "WITH Member [Time].[Time].[1997].[H1] as ' Aggregate({[Time].[1997].[Q1], [Time].[1997].[Q2]})' \n"
             + "  MEMBER [Measures].[Store Margin] as '[Measures].[Store Sales] - [Measures].[Store Cost]'\n"
-            + "SELECT {[Gender].children} on columns,\n"
+            + "SELECT {[Gender].members} on columns,\n"
             + " filter({[Product].members}, [Gender].[F] > 10000) on rows\n"
             + "FROM Sales\n"
             + "WHERE ([Time].[1997].[H1], [Measures].[Store Margin])",
-            2,
+            3,
             6);
     }
 
