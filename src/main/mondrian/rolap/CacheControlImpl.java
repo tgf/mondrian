@@ -518,12 +518,7 @@ public class CacheControlImpl implements CacheControl {
         manager.execute(
             new SegmentCacheManager.Command<Void>() {
                 public Void call() throws Exception {
-                    final List<SegmentHeader> headers =
-                        ((SegmentCacheIndexImpl)manager.segmentIndex)
-                            .getAllHeaders();
-                    for (SegmentHeader header : headers) {
-                        pw.println(header.getDescription());
-                    }
+                    manager.segmentIndex.printCacheState(pw);
                     return null;
                 }
             });

@@ -164,7 +164,7 @@ public class FastBatchingCellReader implements CellReader {
         // If there is a segment matching these criteria, write it to the list
         // of found segments, and remove the cell request from the list.
         final AggregationKey key = new AggregationKey(request);
-        Pair<SegmentHeader, SegmentBody> headerBody =
+        final Pair<SegmentHeader, SegmentBody> headerBody =
             locateHeaderBody(
                 request,
                 request.getMappedCellValues(),
@@ -174,6 +174,7 @@ public class FastBatchingCellReader implements CellReader {
             // segment. Only create a segment the first time we see this segment
             // header.
             final SegmentHeader header = headerBody.left;
+            final SegmentBody body = headerBody.right;
             if (segmentHeaderResults.add(header)) {
                 Segment segment =
                     SegmentBuilder.toSegment(
@@ -183,7 +184,6 @@ public class FastBatchingCellReader implements CellReader {
                         request.getConstrainedColumns(),
                         request.getMeasure(),
                         key.getCompoundPredicateList());
-                final SegmentBody body = headerBody.right;
                 final SegmentWithData segmentWithData =
                     SegmentBuilder.addData(segment, body);
                 futureSegments.add(
@@ -193,7 +193,49 @@ public class FastBatchingCellReader implements CellReader {
             return;
         }
 
-        // TODO: try to roll up
+        // Try to roll up.
+        Map<SegmentHeader, SegmentBody> rollup =
+            locateRollupCandidates(
+                request,
+                request.getMappedCellValues(),
+                key);
+        if (rollup != null) {
+            final Set<String> keepColumns = new HashSet<String>();
+            for (RolapStar.Column column : request.getConstrainedColumns()) {
+                keepColumns.add(column.getExpression().getGenericExpression());
+            }
+            Pair<SegmentHeader, SegmentBody> rollupHeaderBody =
+                SegmentBuilder.rollup(
+                    rollup,
+                    keepColumns,
+                    request.getConstrainedColumnsBitKey());
+            final SegmentHeader header = rollupHeaderBody.left;
+            final SegmentBody body = rollupHeaderBody.right;
+            if (segmentHeaderResults.add(header)) {
+                // Register segment in index and cache.
+                aggMgr.cacheMgr.segmentIndex.add(header);
+                for (SegmentCacheWorker segmentCacheWorker
+                    : aggMgr.segmentCacheWorkers)
+                {
+                    segmentCacheWorker.put(header, body);
+                }
+
+                Segment segment =
+                    SegmentBuilder.toSegment(
+                        header,
+                        request.getMeasure().getStar(),
+                        request.getConstrainedColumnsBitKey(),
+                        request.getConstrainedColumns(),
+                        request.getMeasure(),
+                        key.getCompoundPredicateList());
+                final SegmentWithData segmentWithData =
+                    SegmentBuilder.addData(segment, body);
+                futureSegments.add(
+                    new CompletedFuture<SegmentWithData>(
+                        segmentWithData, null));
+            }
+            return;
+        }
 
         // Finally, add to a batch. It will turn in to a SQL request.
         Batch batch = batches.get(key);
@@ -256,6 +298,60 @@ public class FastBatchingCellReader implements CellReader {
                     return Pair.of(header, body);
                 }
             }
+        }
+        return null;
+    }
+
+    /**
+     * Locates a collection of segments that can be rolled up to create a
+     * segment that will answer a given cell request. Ensures that the
+     * segments actually exist, by getting bodies from the cache before
+     * returning.
+     *
+     * <p>FIXME: Calls {@link SegmentCacheWorker#get}, and that's a slow
+     * blocking call. Make sure that this method is not called from an
+     * agent.</p>
+     *
+     * @param request Cell request
+     * @param map Column values
+     * @param key Aggregate key.
+     * @return Segment header and body
+     */
+    private Map<SegmentHeader, SegmentBody> locateRollupCandidates(
+        CellRequest request,
+        Map<String, Comparable<?>> map,
+        AggregationKey key)
+    {
+        final List<List<SegmentHeader>> rollupList =
+            aggMgr.cacheMgr.segmentIndex.findRollupCandidates(
+                request.getMeasure().getStar().getSchema().getName(),
+                request.getMeasure().getStar().getSchema().getChecksum(),
+                request.getMeasure().getCubeName(),
+                request.getMeasure().getName(),
+                request.getMeasure().getStar().getFactTable().getAlias(),
+                request.getConstrainedColumnsBitKey(),
+                map,
+                AggregationKey.getCompoundPredicateArray(
+                    key.getStar(),
+                    key.getCompoundPredicateList()));
+        final Map<SegmentHeader, SegmentBody> headerBodyMap =
+            new HashMap<SegmentHeader, SegmentBody>();
+        rollupLoop:
+        for (List<SegmentHeader> headerList : rollupList) {
+            headerBodyMap.clear();
+            headerLoop:
+            for (SegmentHeader header : headerList) {
+                for (SegmentCacheWorker worker : aggMgr.segmentCacheWorkers) {
+                    final SegmentBody body = worker.get(header);
+                    if (body != null) {
+                        headerBodyMap.put(header, body);
+                        continue headerLoop;
+                    }
+                }
+                continue rollupLoop; // no cache had body for this segment
+            }
+            assert headerBodyMap.keySet().containsAll(headerList);
+            return headerBodyMap;
         }
         return null;
     }
@@ -525,8 +621,11 @@ public class FastBatchingCellReader implements CellReader {
      * running on a populated cache. Without this feature, every query would
      * require at least two iterations.</p>
      *
-     * <p>Client is responsible for adding the segment to its private cache.</p>
+     * <p>Request does not issue SQL to populate the segment. Nor does it
+     * try to find existing segments for rollup. Those operations can wait until
+     * next phase.</p>
      *
+     * <p>Client is responsible for adding the segment to its private cache.</p>
      *
      * @param request Cell request
      * @return Segment with data, or null if not in cache

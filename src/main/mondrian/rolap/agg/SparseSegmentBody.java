@@ -42,16 +42,23 @@ class SparseSegmentBody extends AbstractSegmentBody {
         }
     }
 
-    public SegmentDataset createSegmentDataset(
-        Segment segment,
-        SegmentAxis[] axes)
-    {
-        SparseSegmentDataset ds =
-            new SparseSegmentDataset();
+    @Override
+    protected int getSize() {
+        return keys.length;
+    }
+
+    @Override
+    protected Object getObject(int i) {
+        throw new UnsupportedOperationException();
+    }
+
+    public Map<CellKey, Object> getValueMap() {
+        final Map<CellKey, Object> map =
+            new HashMap<CellKey, Object>(keys.length * 3 / 2);
         for (int i = 0; i < keys.length; i++) {
-            ds.put(this.keys[i], this.data[i]);
+            map.put(keys[i], data[i]);
         }
-        return ds;
+        return map;
     }
 }
 

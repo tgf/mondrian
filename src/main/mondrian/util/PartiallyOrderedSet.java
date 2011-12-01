@@ -77,7 +77,7 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
      * @param collection Initial contents of partially-ordered set
      */
     public PartiallyOrderedSet(Ordering<E> ordering, Collection<E> collection) {
-        this(ordering, new HashMap<E, Node<E>>(collection.size()));
+        this(ordering, new HashMap<E, Node<E>>(collection.size() * 3 / 2));
         addAll(collection);
     }
 
@@ -574,6 +574,9 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
             return Collections.emptyList();
         }
         final List<Node<E>> c = up ? node.childList : node.parentList;
+        if (c.size() == 1 && c.get(0).e == null) {
+            return Collections.emptyList();
+        }
         ArrayDeque<Node<E>> deque = new ArrayDeque<Node<E>>(c);
 
         final Set<Node<E>> seen = new HashSet<Node<E>>();
@@ -582,7 +585,11 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
             Node<E> node1 = deque.pop();
             list.add(node1.e);
             for (Node<E> child : up ? node1.childList : node1.parentList) {
-                if (child.e != null && seen.add(child)) {
+                if (child.e == null) {
+                    // Node is top or bottom.
+                    break;
+                }
+                if (seen.add(child)) {
                     deque.add(child);
                 }
             }

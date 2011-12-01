@@ -61,68 +61,22 @@ public class SegmentHeader implements Serializable {
     public final ByteString schemaChecksum;
 
     /**
-     * Base constructor for segment headers.
+     * Creates a segment header.
      *
      * @param schemaName The name of the schema which this
      * header belongs to.
+     * @param schemaChecksum Schema checksum
      * @param cubeName The name of the cube this segment belongs to.
      * @param measureName The name of the measure which defines
      * this header.
      * @param constrainedColumns An array of constrained columns
      * objects which define the predicated of this segment header.
-     */
-    public SegmentHeader(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        SegmentColumn[] constrainedColumns,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey)
-    {
-        this(
-            schemaName, schemaChecksum, cubeName, measureName,
-            constrainedColumns, new String[0],
-            rolapStarFactTableName, constrainedColsBitKey);
-    }
-
-    /**
-     * Base constructor for segment headers.
-     *
-     * @param schemaName The name of the schema which this
-     * header belongs to.
-     * @param cubeName The name of the cube this segment belongs to.
-     * @param measureName The name of the measure which defines
-     * this header.
-     * @param constrainedColumns An array of constrained columns
-     * objects which define the predicated of this segment header.
-     */
-    public SegmentHeader(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        SegmentColumn[] constrainedColumns,
-        String[] compoundPredicates,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey)
-    {
-        this(
-            schemaName, schemaChecksum, cubeName, measureName,
-            constrainedColumns, compoundPredicates, rolapStarFactTableName,
-            constrainedColsBitKey, new SegmentColumn[0]);
-    }
-
-    /**
-     * Base constructor for segment headers.
-     *
-     * @param schemaName The name of the schema which this
-     * header belongs to.
-     * @param cubeName The name of the cube this segment belongs to.
-     * @param measureName The name of the measure which defines
-     * this header.
-     * @param constrainedColumns An array of constrained columns
-     * objects which define the predicated of this segment header.
+     * @param compoundPredicates Compound predicates (Must not be null, but
+     * typically empty.)
+     * @param rolapStarFactTableName Star fact table name
+     * @param constrainedColsBitKey Constrained columns bit key
+     * @param excludedRegions Excluded regions. (Must not be null, but typically
+     * empty.)
      */
     public SegmentHeader(
         String schemaName,
@@ -209,8 +163,10 @@ public class SegmentHeader implements Serializable {
                 measureName,
                 colsToAdd.values()
                     .toArray(new SegmentColumn[colsToAdd.size()]),
+                new String[0],
                 rolapStarFactTableName,
-                constrainedColsBitKey);
+                constrainedColsBitKey,
+                new SegmentColumn[0]);
     }
 
     /**
@@ -251,19 +207,19 @@ public class SegmentHeader implements Serializable {
      * Applies a set of exclusions to this segment header and returns
      * a new segment header representing the original one to which a
      * region has been excluded.
-     * @param region
-     * @return
+     *
+     * @param region Region
+     * @return Header with constraint applied
      */
     public SegmentHeader constrain(SegmentColumn[] region) {
         final Map<String, SegmentColumn> newRegions =
             new HashMap<String, SegmentColumn>();
-        for (int i = 0; i < this.excludedRegions.length; i++) {
+        for (SegmentColumn excludedRegion : excludedRegions) {
             newRegions.put(
-                this.excludedRegions[i].columnExpression,
-                this.excludedRegions[i]);
+                excludedRegion.columnExpression,
+                excludedRegion);
         }
-        for (int i = 0; i < region.length; i++) {
-            SegmentColumn col = region[i];
+        for (SegmentColumn col : region) {
             if (getConstrainedColumn(col.columnExpression) == null) {
                 continue;
             }

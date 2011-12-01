@@ -9,10 +9,10 @@
 */
 package mondrian.spi;
 
-import mondrian.rolap.agg.*;
+import mondrian.rolap.CellKey;
 
 import java.io.Serializable;
-import java.util.SortedSet;
+import java.util.*;
 
 /**
  * SegmentBody is the object which contains the cached data of a
@@ -26,18 +26,32 @@ import java.util.SortedSet;
  */
 public interface SegmentBody extends Serializable {
     /**
-     * Returns a SegmentDataset object which contains the cached
-     * data and is initialized to be used with the supplied segment.
+     * Converts contents of this segment into a cellkey/value map. Use only
+     * for sparse segments.
      *
-     * @param segment Segment with which the returned dataset will be associated
-     * @param axes Segment axes, containing actual column values
-     * @return A SegmentDataset object that contains cached data.
+     * @return Map containing cell values keyed by their coordinates
      */
-    SegmentDataset createSegmentDataset(Segment segment, SegmentAxis[] axes);
+    Map<CellKey, Object> getValueMap();
+
+    /**
+     * Returns an array of values. Use only for dense segments.
+     *
+     * @return An array of values
+     */
+    Object getValueArray();
+
+    /**
+     * Returns a bitset indicating whether values are null.
+     * Use only for dense segments.
+     *
+     * @return Indicators
+     */
+    BitSet getIndicators();
 
     /**
      * Returns the cached axis value sets to be used as an
      * initializer for the segment's axis.
+     *
      * @return An array of SortedSets which was cached previously.
      */
     SortedSet<Comparable<?>>[] getAxisValueSets();
@@ -45,6 +59,7 @@ public interface SegmentBody extends Serializable {
     /**
      * Returns an array of boolean values which identify which
      * axis of the cached segment contained null values.
+     *
      * @return An array of boolean values.
      */
     boolean[] getNullAxisFlags();

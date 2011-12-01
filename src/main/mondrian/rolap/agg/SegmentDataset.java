@@ -101,9 +101,7 @@ public interface SegmentDataset extends Iterable<Map.Entry<CellKey, Object>> {
      *     present.
      *     This is supplied by the {@link SegmentLoader}.
      *
-     * @see SegmentBody#createSegmentDataset(Segment, SegmentAxis[])
-     *
-     * @return A {@link SegmentBody} object.
+     * @return A {@link SegmentBody}.
      */
     SegmentBody createSegmentBody(
         List<Pair<SortedSet<Comparable<?>>, Boolean>> axes);

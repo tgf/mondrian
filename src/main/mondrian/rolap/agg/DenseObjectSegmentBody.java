@@ -11,8 +11,7 @@ package mondrian.rolap.agg;
 
 import mondrian.util.Pair;
 
-import java.util.List;
-import java.util.SortedSet;
+import java.util.*;
 
 /**
  * Implementation of a segment body which stores the data inside
@@ -43,14 +42,19 @@ class DenseObjectSegmentBody extends AbstractSegmentBody {
         this.values = values;
     }
 
-    public SegmentDataset createSegmentDataset(
-        Segment segment,
-        SegmentAxis[] axes)
-    {
-        DenseObjectSegmentDataset ds =
-            new DenseObjectSegmentDataset(axes, values);
-        System.arraycopy(values, 0, ds.values, 0, values.length);
-        return ds;
+    @Override
+    public Object getValueArray() {
+        return values;
+    }
+
+    @Override
+    protected Object getObject(int i) {
+        return values[i];
+    }
+
+    @Override
+    protected int getSize() {
+        return values.length; // TODO: subtract number of nulls?
     }
 }
 

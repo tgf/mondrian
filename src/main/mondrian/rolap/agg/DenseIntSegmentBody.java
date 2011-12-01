@@ -46,11 +46,26 @@ class DenseIntSegmentBody extends AbstractSegmentBody {
         this.nullIndicators = nullIndicators;
     }
 
-    public SegmentDataset createSegmentDataset(
-        Segment segment,
-        SegmentAxis[] axes)
-    {
-        return new DenseIntSegmentDataset(axes, values, nullIndicators);
+    @Override
+    public Object getValueArray() {
+        return values;
+    }
+
+    @Override
+    public BitSet getIndicators() {
+        return nullIndicators;
+    }
+
+    protected int getSize() {
+        return values.length - nullIndicators.cardinality();
+    }
+
+    protected Object getObject(int i) {
+        int value = values[i];
+        if (value == 0 && nullIndicators.get(i)) {
+            return null;
+        }
+        return value;
     }
 }
 

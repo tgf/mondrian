@@ -122,6 +122,12 @@ public class PartiallyOrderedSetTest extends TestCase {
         assertEquals("['ab', 'bcd']", poset.getChildren(abcd).toString());
         assertEquals("['b']", poset.getChildren(bcd).toString());
         assertEquals("['b']", poset.getChildren(ab).toString());
+
+        // descendants and ancestors of an element with no descendants
+        assertEquals("[]", poset.getDescendants(empty).toString());
+        assertEquals(
+            "['ab', 'abcd', 'b', 'bcd']",
+            new TreeSet<String>(poset.getAncestors(empty)).toString());
     }
 
     public void testPosetTricky() {
@@ -150,6 +156,10 @@ public class PartiallyOrderedSetTest extends TestCase {
         assertEquals(
             "[240, 360, 480, 600, 720, 840, 960]",
             new TreeSet<Integer>(integers.getAncestors(120)).toString());
+        assertTrue(integers.getDescendants(1).isEmpty());
+        assertEquals(
+            998,
+            integers.getAncestors(1).size());
         assertTrue(integers.isValid(true));
     }
 

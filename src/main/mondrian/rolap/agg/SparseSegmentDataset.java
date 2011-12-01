@@ -35,9 +35,24 @@ import java.util.*;
  * @version $Id$
  */
 class SparseSegmentDataset implements SegmentDataset {
-    final Map<CellKey, Object> values = new HashMap<CellKey, Object>();
+    private final Map<CellKey, Object> values;
 
+    /**
+     * Creates an empty SparseSegmentDataset.
+     */
     SparseSegmentDataset() {
+        this(new HashMap<CellKey, Object>());
+    }
+
+    /**
+     * Creates a SparseSegmentDataset with a given value map. The map is not
+     * copied; a reference to the map is retained inside the dataset, and
+     * therefore the contents of the dataset will change if the map is modified.
+     *
+     * @param values Value map
+     */
+    SparseSegmentDataset(Map<CellKey, Object> values) {
+        this.values = values;
     }
 
     public Object getObject(CellKey pos) {

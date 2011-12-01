@@ -11,10 +11,13 @@ package mondrian.rolap.cache;
 
 import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
+import mondrian.rolap.RolapUtil;
 import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
 import mondrian.util.ByteString;
+import mondrian.util.PartiallyOrderedSet;
 
+import java.io.PrintWriter;
 import java.util.*;
 
 /**
@@ -28,8 +31,8 @@ import java.util.*;
 public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     private final Map<List, List<SegmentHeader>> bitkeyMap =
         new HashMap<List, List<SegmentHeader>>();
-    private final Map<List, List<SegmentHeader>> factMap =
-        new HashMap<List, List<SegmentHeader>>();
+    private final Map<List, FactInfo> factMap =
+        new HashMap<List, FactInfo>();
 
     private final Thread thread;
 
@@ -92,19 +95,29 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         headerList.add(header);
 
         final List factKey = makeFactKey(header);
-        List<SegmentHeader> headerList2 = bitkeyMap.get(factKey);
-        if (headerList2 == null) {
-            headerList2 = new ArrayList<SegmentHeader>();
-            factMap.put(factKey, headerList2);
+        FactInfo factInfo = factMap.get(factKey);
+        if (factInfo == null) {
+            factInfo = new FactInfo();
+            factMap.put(factKey, factInfo);
         }
-        headerList2.add(header);
+        factInfo.headerList.add(header);
+        factInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
     }
 
     public void remove(SegmentHeader header) {
+        final List factKey = makeFactKey(header);
+        final FactInfo factInfo = factMap.get(factKey);
+        factInfo.headerList.remove(header);
+        if (factInfo.headerList.size() == 0) {
+            factMap.remove(factKey);
+        }
+
         final List bitkeyKey = makeBitkeyKey(header);
         final List<SegmentHeader> headerList = bitkeyMap.get(bitkeyKey);
-        if (headerList != null) {
-            headerList.remove(header);
+        headerList.remove(header);
+        if (headerList.size() == 0) {
+            bitkeyMap.remove(bitkeyKey);
+            factInfo.bitkeyPoset.remove(header.getConstrainedColumnsBitKey());
         }
     }
 
@@ -164,12 +177,12 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             cubeName,
             rolapStarFactTableName,
             measureName);
-        final List<SegmentHeader> headerList = factMap.get(factKey);
-        if (headerList == null) {
-            return Collections.emptyList();
-        }
+        final FactInfo factInfo = factMap.get(factKey);
         List<SegmentHeader> list = Collections.emptyList();
-        for (SegmentHeader header : headerList) {
+        if (factInfo == null) {
+            return list;
+        }
+        for (SegmentHeader header : factInfo.headerList) {
             if (intersects(header, region)) {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
@@ -194,11 +207,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             final SegmentColumn headerColumn =
                 header.getConstrainedColumn(regionColumn.getColumnExpression());
             if (headerColumn == null) {
-                /*
-                 * If the segment header doesn't contain a column specified
-                 * by the region, then it always implicitly intersects.
-                 * This allows flush operations to be valid.
-                 */
+                // If the segment header doesn't contain a column specified
+                // by the region, then it always implicitly intersects.
+                // This allows flush operations to be valid.
                 return true;
             }
             final SortedSet<Comparable<?>> regionValues =
@@ -218,8 +229,12 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         return false;
     }
 
-    public List<SegmentHeader> getAllHeaders() {
-        return Collections.emptyList();
+    public void printCacheState(PrintWriter pw) {
+        for (List<SegmentHeader> headerList : bitkeyMap.values()) {
+            for (SegmentHeader header : headerList) {
+                pw.println(header.getDescription());
+            }
+        }
     }
 
     private List makeBitkeyKey(SegmentHeader header) {
@@ -271,6 +286,133 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             cubeName,
             rolapStarFactTableName,
             measureName);
+    }
+
+    public List<List<SegmentHeader>> findRollupCandidates(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String measureName,
+        String rolapStarFactTableName,
+        BitKey constrainedColsBitKey,
+        Map<String, Comparable<?>> coords,
+        String[] compoundPredicates)
+    {
+        final List factKey = makeFactKey(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName);
+        final FactInfo factInfo = factMap.get(factKey);
+        List<List<SegmentHeader>> list = Collections.emptyList();
+        if (factInfo == null) {
+            return list;
+        }
+
+        // Iterate over all dimensionalities that are a superset of the desired
+        // columns and for which a segment is known to exist.
+        //
+        // It helps that getAncestors returns dimensionalities with fewer bits
+        // set first. These will contain fewer cells, and therefore be less
+        // effort to roll up.
+        final List<SegmentHeader> matchingHeaders =
+            new ArrayList<SegmentHeader>();
+
+        // FIXME: poset.getancestors should work even if e is not in poset.
+        factInfo.bitkeyPoset.add(constrainedColsBitKey);
+
+        final List<BitKey> ancestors =
+            factInfo.bitkeyPoset.getAncestors(constrainedColsBitKey);
+        for (BitKey bitKey : ancestors) {
+            final List bitkeyKey = makeBitkeyKey(
+                schemaName,
+                schemaChecksum,
+                cubeName,
+                rolapStarFactTableName,
+                bitKey,
+                measureName);
+            final List<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
+            if (false) {
+                assert headers != null
+                    : "bitkeyPoset / bitkeyMap inconsistency";
+            } else if (headers == null) {
+                continue;
+            }
+
+            // For columns that are still present after roll up, make sure that
+            // the required value is in the range covered by the segment.
+            // Of the columns that are being aggregated away, are all of
+            // them wildcarded? If so, this segment is a match. If not, we
+            // will need to combine with other segments later.
+            matchingHeaders.clear();
+            headerLoop:
+            for (SegmentHeader header : headers) {
+                int nonWildcardCount = 0;
+                for (SegmentColumn column : header.getConstrainedColumns()) {
+                    final SegmentColumn constrainedColumn =
+                        header.getConstrainedColumn(
+                            column.columnExpression);
+
+                    // REVIEW: How are null key values represented in coords?
+                    // Assuming that they are represented by null ref.
+                    if (coords.containsKey(column.columnExpression)) {
+                        // Matching column. Will not be aggregated away. Needs
+                        // to be in range.
+                        Comparable<?> value =
+                            coords.get(column.columnExpression);
+                        if (value == null) {
+                            value = RolapUtil.sqlNullValue;
+                        }
+                        if (constrainedColumn.values != null
+                            && !constrainedColumn.values.contains(value))
+                        {
+                            continue headerLoop;
+                        }
+                    } else {
+                        // Non-matching column. Will be aggregated away. Needs
+                        // to be wildcarded (or some more complicated conditions
+                        // to be dealt with later).
+                        if (constrainedColumn.values != null) {
+                            ++nonWildcardCount;
+                        }
+                    }
+                }
+
+                if (nonWildcardCount == 0) {
+                    if (list.isEmpty()) {
+                        list = new ArrayList<List<SegmentHeader>>();
+                    }
+                    list.add(Collections.singletonList(header));
+                } else {
+                    matchingHeaders.add(header);
+                }
+            }
+
+            // TODO: Find combinations of segments that can roll up. Not
+            // possible if matchingHeaders is empty.
+            Util.discard(matchingHeaders);
+        }
+        return list;
+    }
+
+
+    private static class FactInfo {
+        private static final PartiallyOrderedSet.Ordering<BitKey> ORDERING =
+            new PartiallyOrderedSet.Ordering<BitKey>() {
+                public boolean lessThan(BitKey e1, BitKey e2) {
+                    return e2.isSuperSetOf(e1);
+                }
+            };
+
+        private final List<SegmentHeader> headerList =
+            new ArrayList<SegmentHeader>();
+
+        private final PartiallyOrderedSet<BitKey> bitkeyPoset =
+            new PartiallyOrderedSet<BitKey>(ORDERING);
+
+        FactInfo() {
+        }
     }
 }
 

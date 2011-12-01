@@ -76,7 +76,8 @@ public class SegmentAxis {
             this.mapKeyToOffset = Collections.emptyMap();
         } else {
             this.keys = keys;
-            mapKeyToOffset = new HashMap<Comparable<?>, Integer>(keys.length);
+            mapKeyToOffset =
+                new HashMap<Comparable<?>, Integer>(keys.length * 3 / 2);
             for (int i = 0; i < keys.length; i++) {
                 mapKeyToOffset.put(keys[i], i);
             }
