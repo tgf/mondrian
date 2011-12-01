@@ -570,11 +570,13 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
 
     private List<E> descendants(E e, boolean up) {
         Node<E> node = map.get(e);
+        final Collection<Node<E>> c;
         if (node == null) {
-            return Collections.emptyList();
+            c = up ? findChildren(e) : findParents(e);
+        } else {
+            c = up ? node.childList : node.parentList;
         }
-        final List<Node<E>> c = up ? node.childList : node.parentList;
-        if (c.size() == 1 && c.get(0).e == null) {
+        if (c.size() == 1 && c.iterator().next().e == null) {
             return Collections.emptyList();
         }
         ArrayDeque<Node<E>> deque = new ArrayDeque<Node<E>>(c);

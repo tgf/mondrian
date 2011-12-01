@@ -319,9 +319,6 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         final List<SegmentHeader> matchingHeaders =
             new ArrayList<SegmentHeader>();
 
-        // FIXME: poset.getancestors should work even if e is not in poset.
-        factInfo.bitkeyPoset.add(constrainedColsBitKey);
-
         final List<BitKey> ancestors =
             factInfo.bitkeyPoset.getAncestors(constrainedColsBitKey);
         for (BitKey bitKey : ancestors) {
@@ -333,12 +330,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                 bitKey,
                 measureName);
             final List<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
-            if (false) {
-                assert headers != null
-                    : "bitkeyPoset / bitkeyMap inconsistency";
-            } else if (headers == null) {
-                continue;
-            }
+            assert headers != null : "bitkeyPoset / bitkeyMap inconsistency";
 
             // For columns that are still present after roll up, make sure that
             // the required value is in the range covered by the segment.

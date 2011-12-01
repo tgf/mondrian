@@ -110,24 +110,32 @@ public class PartiallyOrderedSetTest extends TestCase {
         assertEquals("['ab', 'bcd']", poset.getChildren(abcd).toString());
 
         final String b = "'b'";
+
+        // ancestors of an element not in the set
+        assertEqualsList("['ab', 'abcd', 'bcd']", poset.getAncestors(b));
+
         poset.add(b);
         printValidate(poset);
         assertEquals("['abcd']", poset.getNonChildren().toString());
         assertEquals("['']", poset.getNonParents().toString());
         assertEquals("['']", poset.getChildren(b).toString());
-        assertEquals(
-            "['ab', 'bcd']",
-            new TreeSet<String>(poset.getParents(b)).toString());
+        assertEqualsList("['ab', 'bcd']", poset.getParents(b));
         assertEquals("['']", poset.getChildren(b).toString());
         assertEquals("['ab', 'bcd']", poset.getChildren(abcd).toString());
         assertEquals("['b']", poset.getChildren(bcd).toString());
         assertEquals("['b']", poset.getChildren(ab).toString());
+        assertEqualsList("['ab', 'abcd', 'bcd']", poset.getAncestors(b));
 
         // descendants and ancestors of an element with no descendants
         assertEquals("[]", poset.getDescendants(empty).toString());
-        assertEquals(
+        assertEqualsList(
             "['ab', 'abcd', 'b', 'bcd']",
-            new TreeSet<String>(poset.getAncestors(empty)).toString());
+            poset.getAncestors(empty));
+
+        // some more ancestors of missing elements
+        assertEqualsList("['abcd']", poset.getAncestors("'ac'"));
+        assertEqualsList("[]", poset.getAncestors("'z'"));
+        assertEqualsList("['ab', 'abcd']", poset.getAncestors("'a'"));
     }
 
     public void testPosetTricky() {
@@ -280,6 +288,12 @@ public class PartiallyOrderedSetTest extends TestCase {
             set.add(random.nextInt(max) + 1);
         }
         return set;
+    }
+
+    private static void assertEqualsList(String expected, List<String> ss) {
+        assertEquals(
+            expected,
+            new TreeSet<String>(ss).toString());
     }
 }
 
