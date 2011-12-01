@@ -274,11 +274,11 @@ public class SegmentBuilder {
                     final Comparable value = valueArray[ordinal];
                     int targetOrdinal;
                     if (value == null) {
-                        targetOrdinal = axes[i].valueSet.size();
+                        targetOrdinal = axes[z].valueSet.size();
                     } else {
                         targetOrdinal =
                             Arrays.binarySearch(
-                                axes[i].values, value);
+                                axes[z].values, value);
                     }
                     pos[z++] = targetOrdinal;
                 }
