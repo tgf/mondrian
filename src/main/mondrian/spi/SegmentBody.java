@@ -9,7 +9,6 @@
 */
 package mondrian.spi;
 
-import mondrian.rolap.CellKey;
 
 import java.io.Serializable;
 import java.util.*;
@@ -31,7 +30,7 @@ public interface SegmentBody extends Serializable {
      *
      * @return Map containing cell values keyed by their coordinates
      */
-    Map<CellKey, Object> getValueMap();
+    Map<SegmentCellKey, Object> getValueMap();
 
     /**
      * Returns an array of values. Use only for dense segments.

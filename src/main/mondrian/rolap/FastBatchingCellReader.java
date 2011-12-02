@@ -193,12 +193,22 @@ public class FastBatchingCellReader implements CellReader {
             return;
         }
 
-        // Try to roll up.
-        Map<SegmentHeader, SegmentBody> rollup =
-            locateRollupCandidates(
-                request,
-                request.getMappedCellValues(),
-                key);
+        // Try to roll up if the measure's rollup aggregator supports
+        // "fast" aggregation from raw objects.
+        final Map<SegmentHeader, SegmentBody> rollup;
+        if (request.getMeasure().getAggregator().getRollup()
+            .supportsFastAggregates(request.getMeasure().getDatatype()))
+        {
+            // Don't even bother doing a segment lookup if we can't
+            // rollup that measure.
+            rollup =
+                locateRollupCandidates(
+                    request,
+                    request.getMappedCellValues(),
+                    key);
+        } else {
+            rollup = null;
+        }
         if (rollup != null) {
             final Set<String> keepColumns = new HashSet<String>();
             for (RolapStar.Column column : request.getConstrainedColumns()) {
@@ -208,7 +218,8 @@ public class FastBatchingCellReader implements CellReader {
                 SegmentBuilder.rollup(
                     rollup,
                     keepColumns,
-                    request.getConstrainedColumnsBitKey());
+                    request.getConstrainedColumnsBitKey(),
+                    request.getMeasure().getAggregator().getRollup());
             final SegmentHeader header = rollupHeaderBody.left;
             final SegmentBody body = rollupHeaderBody.right;
             if (segmentHeaderResults.add(header)) {

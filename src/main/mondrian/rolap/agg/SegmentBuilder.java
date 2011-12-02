@@ -9,6 +9,7 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.olap.Aggregator;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.agg.Segment.ExcludedRegion;
@@ -18,6 +19,7 @@ import mondrian.util.ArraySortedSet;
 import mondrian.util.Pair;
 
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * Helper class that contains methods to convert between
@@ -82,7 +84,8 @@ public class SegmentBuilder {
                     axes, (Object[]) body.getValueArray());
         } else if (body instanceof SparseSegmentBody) {
             dataSet =
-                new SparseSegmentDataset(body.getValueMap());
+                new SparseSegmentDataset(
+                    ((SparseSegmentBody)body).getCellKeyValueMap());
         } else {
             throw Util.newInternal(
                 "Unknown segment body type: " + body.getClass() + ": " + body);
@@ -160,12 +163,18 @@ public class SegmentBuilder {
      * to create a segment with reduced dimensionality.
      *
      * @param map Source segment headers and bodies
+     * @param keepColumns A list of column names to keep as part of
+     * the rolled up segment.
+     * @param targetBitkey The column bit key to match with the
+     * resulting segment.
+     * @param rollupAggregator The aggregator to use to rollup.
      * @return Segment header and body of requested dimensionality
      */
     public static Pair<SegmentHeader, SegmentBody> rollup(
         Map<SegmentHeader, SegmentBody> map,
         Set<String> keepColumns,
-        BitKey targetBitkey)
+        BitKey targetBitkey,
+        Aggregator rollupAggregator)
     {
         class AxisInfo {
             SegmentColumn column;
@@ -241,72 +250,151 @@ public class SegmentBuilder {
         // We should do really efficient rollup if the source is an array: we
         // should box values (e.g double to Double and back), and we should read
         // a stripe of values from the and add them up into a single cell.
-        final Map<CellKey, Object> cellValues =
-            new HashMap<CellKey, Object>();
-        final int[] pos = new int[axes.length];
-        final Comparable[][] valueArrays =
-            new Comparable[firstHeader.getConstrainedColumns().length][];
+        final Map<SegmentCellKey, List<Object>> cellValues =
+            new HashMap<SegmentCellKey, List<Object>>();
         for (Map.Entry<SegmentHeader, SegmentBody> entry : map.entrySet()) {
+            final int[] pos = new int[axes.length];
+            final Comparable<?>[][] valueArrays =
+                new Comparable[firstHeader.getConstrainedColumns().length][];
             final SegmentBody body = entry.getValue();
 
             // Copy source value sets into arrays. For axes that are being
             // projected away, store null.
             z = 0;
             for (SortedSet<Comparable<?>> set : body.getAxisValueSets()) {
-                valueArrays[z] =
-                    keepColumns.contains(
-                        firstHeader.getConstrainedColumns()[z].columnExpression)
+                valueArrays[z] = keepColumns.contains(
+                    firstHeader.getConstrainedColumns()[z].columnExpression)
                         ? set.toArray(new Comparable[set.size()])
                         : null;
                 ++z;
             }
-            Map<CellKey, Object> v = body.getValueMap();
-            for (Map.Entry<CellKey, Object> vEntry : v.entrySet()) {
-                final CellKey cellKey = vEntry.getKey();
-                int[] ordinals = cellKey.getOrdinals();
+            Map<SegmentCellKey, Object> v = body.getValueMap();
+            for (Map.Entry<SegmentCellKey, Object> vEntry : v.entrySet()) {
                 z = 0;
-                for (int i = 0; i < ordinals.length; i++) {
-                    final Comparable[] valueArray = valueArrays[i];
+                for (int i = 0; i < vEntry.getKey().getArrity(); i++) {
+                    final Comparable<?>[] valueArray = valueArrays[i];
                     if (valueArray == null) {
                         continue;
                     }
-                    final int ordinal = ordinals[i];
-                    final Comparable value = valueArray[ordinal];
+                    final int ordinal = vEntry.getKey().getOrdinals()[i];
+                    final Comparable<?> value = valueArray[ordinal];
                     int targetOrdinal;
                     if (value == null) {
                         targetOrdinal = axes[z].valueSet.size();
                     } else {
                         targetOrdinal =
-                            Arrays.binarySearch(
-                                axes[z].values, value);
+                            Util.binarySearch(
+                                axes[z].values,
+                                0, axes[z].values.length,
+                                value);
                     }
                     pos[z++] = targetOrdinal;
                 }
-                final CellKey targetCellKey =
-                    CellKey.Generator.newCellKey(pos);
-                final Object cellValue = vEntry.getValue();
-                final Object prevValue =
-                    cellValues.put(targetCellKey, cellValue);
-                if (prevValue != null) {
-                    cellValues.put(
-                        targetCellKey,
-                        plus(prevValue, cellValue));
+                final SegmentCellKey ck = new SegmentCellKey(pos);
+                if (!cellValues.containsKey(ck)) {
+                    cellValues.put(ck, new ArrayList<Object>());
                 }
+                cellValues.get(ck).add(vEntry.getValue());
             }
         }
 
-        // Create body.
+        // Build the axis list.
         final List<Pair<SortedSet<Comparable<?>>, Boolean>> axisList =
             new ArrayList<Pair<SortedSet<Comparable<?>>, Boolean>>();
-        for (AxisInfo axis : axes) {
+        final BitSet nullIndicators = new BitSet(axes.length);
+        int nbValues = 1;
+        for (int i = 0; i < axes.length; i++) {
             axisList.add(
                 new Pair<SortedSet<Comparable<?>>, Boolean>(
-                    axis.valueSet, axis.hasNull));
+                    axes[i].valueSet, axes[i].hasNull));
+            nullIndicators.set(i, axes[i].hasNull);
+            nbValues *= axes[i].values.length;
         }
-        SegmentBody body =
-            new SparseSegmentBody(
-                cellValues,
-                axisList);
+        final int[] axisMultipliers =
+            computeAxisMultipliers(axisList);
+
+        final SegmentBody body;
+        // Peak at the values and determine the best way to store them
+        // (whether to use a dense native dataset or a sparse one.
+        if (cellValues.size() == 0) {
+            // Just store the data into an empty dense object dataset.
+            body =
+                new DenseObjectSegmentBody(
+                    new Object[0],
+                    axisList);
+        } else if (SegmentLoader.useSparse(
+                cellValues.size(),
+                cellValues.size() - nullIndicators.cardinality()))
+        {
+            // The rule says we must use a sparse dataset.
+            // First, aggregate the values of each key.
+            final Map<CellKey, Object> data =
+                new HashMap<CellKey, Object>();
+            for (Entry<SegmentCellKey, List<Object>> entry
+                : cellValues.entrySet())
+            {
+                data.put(
+                    CellKey.Generator.newCellKey(entry.getKey().getOrdinals()),
+                    rollupAggregator.aggregate(entry.getValue()));
+            }
+            body =
+                new SparseSegmentBody(
+                    data,
+                    axisList);
+        } else {
+            // Peek at the value class. We will use a native dataset
+            // if possible.
+            final Object peek =
+                cellValues.entrySet().iterator().next().getValue().get(0);
+            if (peek instanceof Double) {
+                final double[] data = new double[nbValues];
+                for (Entry<SegmentCellKey, List<Object>> entry
+                    : cellValues.entrySet())
+                {
+                    final int offset =
+                        CellKey.Generator.getOffset(
+                            entry.getKey().getOrdinals(), axisMultipliers);
+                    data[offset] =
+                        (Double)rollupAggregator.aggregate(entry.getValue());
+                }
+                body =
+                    new DenseDoubleSegmentBody(
+                        nullIndicators,
+                        data,
+                        axisList);
+            } else if (peek instanceof Integer) {
+                final int[] data = new int[cellValues.size()];
+                for (Entry<SegmentCellKey, List<Object>> entry
+                    : cellValues.entrySet())
+                {
+                    final int offset =
+                        CellKey.Generator.getOffset(
+                            entry.getKey().getOrdinals(), axisMultipliers);
+                    data[offset] =
+                        (Integer)rollupAggregator.aggregate(entry.getValue());
+                }
+                body =
+                    new DenseIntSegmentBody(
+                        nullIndicators,
+                        data,
+                        axisList);
+            } else {
+                final Object[] data = new Object[cellValues.size()];
+                for (Entry<SegmentCellKey, List<Object>> entry
+                    : cellValues.entrySet())
+                {
+                    final int offset =
+                        CellKey.Generator.getOffset(
+                            entry.getKey().getOrdinals(), axisMultipliers);
+                    data[offset] =
+                        (Object)rollupAggregator.aggregate(entry.getValue());
+                }
+                body =
+                    new DenseObjectSegmentBody(
+                        data,
+                        axisList);
+            }
+        }
 
         // Create header.
         final SegmentColumn[] constrainedColumns =
@@ -320,7 +408,7 @@ public class SegmentBuilder {
                         ? axisList.get(i).left
                         : axisInfo.column.values);
         }
-        SegmentHeader header =
+        final SegmentHeader header =
             new SegmentHeader(
                 firstHeader.schemaName,
                 firstHeader.schemaChecksum,
@@ -335,27 +423,47 @@ public class SegmentBuilder {
         return Pair.of(header, body);
     }
 
-    private static Object plus(Object value1, Object value2) {
-        if (value1 instanceof Integer) {
-            return (Integer) value1 + (Integer) value2;
-        } else {
-            return (Double) value1 + (Double) value2;
-        }
-    }
-
-
-    private static <E> SortedSet<E> intersect(
-        SortedSet<E> set1,
-        SortedSet<E> set2)
+    /*
+     * TODO: Factor this out into ArraySortedSet or Util.
+     */
+    private static SortedSet<Comparable<?>> intersect(
+        SortedSet<Comparable<?>> set1,
+        SortedSet<Comparable<?>> set2)
     {
-        // TODO: There is a more efficient algorithm to intersect sets, given
-        // that they are sorted. Or use Comparable[] rather than SortedSet if
-        // more efficient.
-        final TreeSet<E> set = new TreeSet<E>(set1);
-        set.retainAll(set2);
-        return set;
+        final Iterator<Comparable<?>> it1 = set1.iterator();
+        final Iterator<Comparable<?>> it2 = set2.iterator();
+        final Comparable<?>[] result =
+            new Comparable[Math.max(set1.size(), set2.size())];
+        int i = 0;
+        Comparable e1 = it1.next();
+        Comparable e2 = it2.next();
+        while (e1 != null && e2 != null) {
+            final int compare = e1.compareTo(e2);
+            if (compare == 0) {
+                result[i++] = e1;
+                i++;
+                e1 = it1.next();
+                e2 = it2.next();
+            } else if (compare == 1) {
+                e2 = it2.next();
+            } else {
+                e1 = it1.next();
+            }
+        };
+        return new ArraySortedSet(result, 0, i);
     }
 
+    private static int[] computeAxisMultipliers(
+        List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
+    {
+        final int[] axisMultipliers = new int[axes.size()];
+        int multiplier = 1;
+        for (int i = axes.size() - 1; i >= 0; --i) {
+            axisMultipliers[i] = multiplier;
+            multiplier *= axes.get(i).left.size();
+        }
+        return axisMultipliers;
+    }
     private static class ExcludedRegionList
         extends AbstractList<Segment.ExcludedRegion>
         implements Segment.ExcludedRegion

@@ -802,7 +802,7 @@ public class SegmentLoader {
      * @param actualCount   Actual number of values.
      * @return Whether to use a sparse representation.
      */
-    private static boolean useSparse(
+    static boolean useSparse(
         final double possibleCount,
         final double actualCount)
     {

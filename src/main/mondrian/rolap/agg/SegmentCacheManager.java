@@ -244,29 +244,16 @@ import java.util.concurrent.*;
  */
 public class SegmentCacheManager {
     private final Handler handler = new Handler();
+    private final Actor ACTOR;
+    public final SegmentCacheIndex segmentIndex;
+    private final Thread thread;
 
-    private static final Actor ACTOR;
-
-    static {
+    public SegmentCacheManager() {
         ACTOR = new Actor();
-    }
-
-    public final SegmentCacheIndex segmentIndex =
-        new SegmentCacheIndexImpl(ACTOR.thread);
-
-    static {
-        // Create and start thread for actor.
-        //
-        // Actor is shared between all servers. This reduces concurrency.
-        // This might become a concern for those executing several active
-        // servers in the same JVM.
-        // We tried creating one actor (and therefore thread) per server, but
-        // some applications (and in particular some tests) create lots of
-        // servers.
-        //
-        // The actor is shut down with the JVM.
-        final Thread thread = new Thread(ACTOR, "Mondrian segment cache");
+        thread = new Thread(
+            ACTOR, "mondrian.rolap.agg.SegmentCacheManager$ACTOR");
         thread.setDaemon(true);
+        segmentIndex = new SegmentCacheIndexImpl(thread);
         thread.start();
     }
 
@@ -372,6 +359,13 @@ public class SegmentCacheManager {
         ACTOR.event(
             handler,
             new ExternalSegmentDeletedEvent(aggMgr, header));
+    }
+
+    /**
+     * Shuts down this cache manager and all active threads and indexes.
+     */
+    public void shutdown() {
+        execute(new ShutdownCommand());
     }
 
     /**
@@ -659,11 +653,6 @@ public class SegmentCacheManager {
      * abstracting common code.
      */
     private static class Actor implements Runnable {
-        /**
-         * Current thread. Not null if and only if actor is running. Can be used
-         * to check that data structures are called from the dedicated thread.
-         */
-        private Thread thread;
 
         private final BlockingQueue<Pair<Handler, Message>> eventQueue =
             new ArrayBlockingQueue<Pair<Handler, Message>>(1000);
@@ -673,7 +662,6 @@ public class SegmentCacheManager {
             new ResponseQueue<Command<?>, Pair<Object, Throwable>>(1000);
 
         public void run() {
-            thread = Thread.currentThread();
             try {
                 for (;;) {
                     final Pair<Handler, Message> entry = eventQueue.take();
@@ -713,8 +701,6 @@ public class SegmentCacheManager {
             } catch (InterruptedException e) {
                 // REVIEW: Somewhere better to send it?
                 e.printStackTrace();
-            } finally {
-                thread = null;
             }
         }
 

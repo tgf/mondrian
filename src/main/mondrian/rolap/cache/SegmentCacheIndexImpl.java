@@ -31,7 +31,22 @@ import java.util.*;
 public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     private final Map<List, List<SegmentHeader>> bitkeyMap =
         new HashMap<List, List<SegmentHeader>>();
+    /**
+     * The fact map allows us to spot quickly which
+     * segments have facts relating to a given header.
+     */
     private final Map<List, FactInfo> factMap =
+        new HashMap<List, FactInfo>();
+    /**
+     * The fuzzy fact map allows us to spot quickly which
+     * segments have facts relating to a given header, but doesn't
+     * consider the compound predicates in the key. This allows
+     * flush operations to be consistent.
+     */
+    // TODO Get rid of the fuzzy map once we have a way to parse
+    // compound predicates into rich objects that can be serialized
+    // as part of the SegmentHeader.
+    private final Map<List, FactInfo> fuzzyFactMap =
         new HashMap<List, FactInfo>();
 
     private final Thread thread;
@@ -65,7 +80,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                 cubeName,
                 rolapStarFactTableName,
                 constrainedColsBitKey,
-                measureName);
+                measureName,
+                compoundPredicates);
         final List<SegmentHeader> headerList = bitkeyMap.get(starKey);
         if (headerList == null) {
             return Collections.emptyList();
@@ -102,6 +118,15 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         }
         factInfo.headerList.add(header);
         factInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
+
+        final List fuzzyFactKey = makeFuzzyFactKey(header);
+        FactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
+        if (fuzzyFactInfo == null) {
+            fuzzyFactInfo = new FactInfo();
+            fuzzyFactMap.put(fuzzyFactKey, fuzzyFactInfo);
+        }
+        fuzzyFactInfo.headerList.add(header);
+        fuzzyFactInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
     }
 
     public void remove(SegmentHeader header) {
@@ -110,6 +135,13 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         factInfo.headerList.remove(header);
         if (factInfo.headerList.size() == 0) {
             factMap.remove(factKey);
+        }
+
+        final List fuzzyFactKey = makeFuzzyFactKey(header);
+        final FactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
+        fuzzyFactInfo.headerList.remove(header);
+        if (fuzzyFactInfo.headerList.size() == 0) {
+            fuzzyFactMap.remove(fuzzyFactKey);
         }
 
         final List bitkeyKey = makeBitkeyKey(header);
@@ -171,13 +203,13 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     {
         assert thread == Thread.currentThread()
             : "expected " + thread + ", but was " + Thread.currentThread();
-        final List factKey = makeFactKey(
+        final List factKey = makeFuzzyFactKey(
             schemaName,
             schemaChecksum,
             cubeName,
             rolapStarFactTableName,
             measureName);
-        final FactInfo factInfo = factMap.get(factKey);
+        final FactInfo factInfo = fuzzyFactMap.get(factKey);
         List<SegmentHeader> list = Collections.emptyList();
         if (factInfo == null) {
             return list;
@@ -244,7 +276,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             header.cubeName,
             header.rolapStarFactTableName,
             header.constrainedColsBitKey,
-            header.measureName);
+            header.measureName,
+            header.compoundPredicates);
     }
 
     private List makeBitkeyKey(
@@ -253,7 +286,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String cubeName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        String measureName)
+        String measureName,
+        String[] compoundPredicates)
     {
         return Arrays.asList(
             schemaName,
@@ -261,7 +295,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             cubeName,
             rolapStarFactTableName,
             constrainedColsBitKey,
-            measureName);
+            measureName,
+            Arrays.deepToString(compoundPredicates));
     }
 
     private List makeFactKey(SegmentHeader header) {
@@ -270,10 +305,37 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             header.schemaChecksum,
             header.cubeName,
             header.rolapStarFactTableName,
-            header.measureName);
+            header.measureName,
+            header.compoundPredicates);
     }
 
     private List makeFactKey(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String rolapStarFactTableName,
+        String measureName,
+        String[] compoundPredicates)
+    {
+        return Arrays.asList(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName,
+            Arrays.deepToString(compoundPredicates));
+    }
+
+    private List makeFuzzyFactKey(SegmentHeader header) {
+        return makeFuzzyFactKey(
+            header.schemaName,
+            header.schemaChecksum,
+            header.cubeName,
+            header.rolapStarFactTableName,
+            header.measureName);
+    }
+
+    private List makeFuzzyFactKey(
         String schemaName,
         ByteString schemaChecksum,
         String cubeName,
@@ -303,7 +365,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             schemaChecksum,
             cubeName,
             rolapStarFactTableName,
-            measureName);
+            measureName,
+            compoundPredicates);
         final FactInfo factInfo = factMap.get(factKey);
         List<List<SegmentHeader>> list = Collections.emptyList();
         if (factInfo == null) {
@@ -328,7 +391,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                 cubeName,
                 rolapStarFactTableName,
                 bitKey,
-                measureName);
+                measureName,
+                compoundPredicates);
             final List<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
             assert headers != null : "bitkeyPoset / bitkeyMap inconsistency";
 

@@ -62,7 +62,7 @@ public class MockSegmentCache implements SegmentCache {
             byte[] pickled = out.toByteArray();
             InputStream in = new ByteArrayInputStream(pickled);
             ObjectInputStream ois = new ObjectInputStream(in);
-            SegmentColumn o = (SegmentColumn) ois.readObject();
+            SegmentHeader o = (SegmentHeader) ois.readObject();
             Util.discard(o);
         } catch (Exception e) {
             throw new RuntimeException(e);

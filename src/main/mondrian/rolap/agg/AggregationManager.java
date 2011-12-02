@@ -54,9 +54,9 @@ public class AggregationManager extends RolapAggregationManager {
 
     // TODO: create using factory and/or configuration parameters. Executor
     //   should be shared within MondrianServer or target JDBC database.
-    public final Executor sqlExecutor =
+    public final ExecutorService sqlExecutor =
         Util.getExecutorService(
-            10, 3, 1, 10, "mondrian.rolap.agg.AggregationManager$sqlExecutor");
+            10, 0, 1, 10, "mondrian.rolap.agg.AggregationManager$sqlExecutor");
 
     /**
      * Returns or creates the singleton.
@@ -494,6 +494,8 @@ System.out.println(buf.toString());
         for (SegmentCacheWorker worker : segmentCacheWorkers) {
             worker.shutdown();
         }
+        sqlExecutor.shutdown();
+        cacheMgr.shutdown();
     }
 
     /**

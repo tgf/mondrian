@@ -10,6 +10,7 @@
 package mondrian.rolap.agg;
 
 import mondrian.rolap.CellKey;
+import mondrian.spi.SegmentCellKey;
 import mondrian.util.Pair;
 
 import java.util.*;
@@ -25,6 +26,7 @@ class SparseSegmentBody extends AbstractSegmentBody {
     private static final long serialVersionUID = -6684830985364895836L;
     final CellKey[] keys;
     final Object[] data;
+    final SegmentCellKey[] intCellKeys;
 
     SparseSegmentBody(
         Map<CellKey, Object> dataToSave,
@@ -34,10 +36,12 @@ class SparseSegmentBody extends AbstractSegmentBody {
 
         this.keys = new CellKey[dataToSave.size()];
         this.data = new Object[dataToSave.size()];
+        this.intCellKeys = new SegmentCellKey[dataToSave.size()];
         int i = 0;
         for (Map.Entry<CellKey, Object> entry : dataToSave.entrySet()) {
             keys[i] = entry.getKey();
             data[i] = entry.getValue();
+            intCellKeys[i] = new SegmentCellKey(entry.getKey().getOrdinals());
             ++i;
         }
     }
@@ -52,11 +56,21 @@ class SparseSegmentBody extends AbstractSegmentBody {
         throw new UnsupportedOperationException();
     }
 
-    public Map<CellKey, Object> getValueMap() {
+    public Map<CellKey, Object> getCellKeyValueMap() {
         final Map<CellKey, Object> map =
             new HashMap<CellKey, Object>(keys.length * 3 / 2);
         for (int i = 0; i < keys.length; i++) {
             map.put(keys[i], data[i]);
+        }
+        return map;
+    }
+
+    @Override
+    public Map<SegmentCellKey, Object> getValueMap() {
+        final Map<SegmentCellKey, Object> map =
+            new HashMap<SegmentCellKey, Object>(keys.length * 3 / 2);
+        for (int i = 0; i < intCellKeys.length; i++) {
+            map.put(intCellKeys[i], data[i]);
         }
         return map;
     }

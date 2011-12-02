@@ -11,6 +11,10 @@ package mondrian.olap;
 
 import mondrian.calc.Calc;
 import mondrian.calc.TupleList;
+import mondrian.spi.Dialect.Datatype;
+import mondrian.spi.SegmentBody;
+
+import java.util.List;
 
 /**
  * Describes an aggregation operator, such as "sum" or "count".
@@ -37,6 +41,35 @@ public interface Aggregator {
      * @param calc Expression to evaluate
      */
     Object aggregate(Evaluator evaluator, TupleList members, Calc calc);
+
+    /**
+     * Tells Mondrian if this aggregator can perform fast aggregation
+     * using only the raw data of a given object type. This will
+     * determine if Mondrian will attempt to perform in-memory rollups
+     * on raw segment data by invoking {@link Aggregator#aggregate(Object[])}.
+     *
+     * <p>This is only invoked for rollup operations.
+     *
+     * @param datatype The datatype of the object we would like to rollup.
+     * @return True or false, depending on the support status.
+     */
+    boolean supportsFastAggregates(Datatype datatype);
+
+    /**
+     * Applies this aggregator over a raw list of objects for a rollup
+     * operation. This is useful when the values are already resolved
+     * and we are dealing with a raw {@link SegmentBody} object.
+     *
+     * <p>Only gets called if {@link Aggregator#supportsFastAggregates()}
+     * is true.
+     *
+     * <p>This is only invoked for rollup operations.
+     *
+     * @param rawData An array of values in its raw form, to be aggregated.
+     * @return A rolled up value of the raw data.
+     * if the object type is not supported.
+     */
+    Object aggregate(List<Object> rawData);
 }
 
 // End Aggregator.java
