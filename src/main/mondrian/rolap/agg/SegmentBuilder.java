@@ -218,7 +218,9 @@ public class SegmentBuilder {
                     axis.hasNull = hasNull;
                     axis.requestedValues = requestedValues;
                 } else {
-                    axis.valueSet = intersect(values, axis.valueSet);
+                    axis.valueSet = ArraySortedSet.intersect(
+                        values,
+                        axis.valueSet);
                     axis.hasNull = hasNull && axis.hasNull;
                     if (!Util.equals(axis.requestedValues, requestedValues)) {
                         if (axis.requestedValues == null) {
@@ -404,6 +406,7 @@ public class SegmentBuilder {
             constrainedColumns[i] =
                 new SegmentColumn(
                     axisInfo.column.getColumnExpression(),
+                    axisInfo.column.getValueCount(),
                     axisInfo.lostPredicate
                         ? axisList.get(i).left
                         : axisInfo.column.values);
@@ -423,36 +426,6 @@ public class SegmentBuilder {
         return Pair.of(header, body);
     }
 
-    /*
-     * TODO: Factor this out into ArraySortedSet or Util.
-     */
-    private static SortedSet<Comparable<?>> intersect(
-        SortedSet<Comparable<?>> set1,
-        SortedSet<Comparable<?>> set2)
-    {
-        final Iterator<Comparable<?>> it1 = set1.iterator();
-        final Iterator<Comparable<?>> it2 = set2.iterator();
-        final Comparable<?>[] result =
-            new Comparable[Math.max(set1.size(), set2.size())];
-        int i = 0;
-        Comparable e1 = it1.next();
-        Comparable e2 = it2.next();
-        while (e1 != null && e2 != null) {
-            final int compare = e1.compareTo(e2);
-            if (compare == 0) {
-                result[i++] = e1;
-                i++;
-                e1 = it1.next();
-                e2 = it2.next();
-            } else if (compare == 1) {
-                e2 = it2.next();
-            } else {
-                e1 = it1.next();
-            }
-        };
-        return new ArraySortedSet(result, 0, i);
-    }
-
     private static int[] computeAxisMultipliers(
         List<Pair<SortedSet<Comparable<?>>, Boolean>> axes)
     {
@@ -464,6 +437,7 @@ public class SegmentBuilder {
         }
         return axisMultipliers;
     }
+
     private static class ExcludedRegionList
         extends AbstractList<Segment.ExcludedRegion>
         implements Segment.ExcludedRegion
@@ -572,6 +546,7 @@ public class SegmentBuilder {
                     new SegmentColumn(
                         predicate.getConstrainedColumn()
                             .getExpression().getGenericExpression(),
+                        predicate.getConstrainedColumn().getCardinality(),
                         null));
             } else {
                 Arrays.sort(
@@ -580,7 +555,8 @@ public class SegmentBuilder {
                 ccs.add(
                     new SegmentColumn(
                         predicate.getConstrainedColumn()
-                        .getExpression().getGenericExpression(),
+                            .getExpression().getGenericExpression(),
+                        predicate.getConstrainedColumn().getCardinality(),
                         new ArraySortedSet(valuesArray)));
             }
         }

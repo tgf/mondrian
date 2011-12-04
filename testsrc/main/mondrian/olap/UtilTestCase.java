@@ -1251,6 +1251,27 @@ public class UtilTestCase extends TestCase {
         }
         assertEquals(expected, list.toString());
     }
+
+
+    public void testIntersectSortedSet() {
+        final ArraySortedSet<String> ace =
+            new ArraySortedSet(new String[]{ "a", "c", "e"});
+        final ArraySortedSet<String> cd =
+            new ArraySortedSet(new String[]{ "c", "d"});
+        final ArraySortedSet<String> bdf =
+            new ArraySortedSet(new String[]{ "b", "d", "f"});
+        final ArraySortedSet<String> bde =
+            new ArraySortedSet(new String[]{ "b", "d", "e"});
+        final ArraySortedSet<String> empty =
+            new ArraySortedSet(new String[]{});
+        checkToString("[a, c, e]", ArraySortedSet.intersect(ace, ace));
+        checkToString("[c]", ArraySortedSet.intersect(ace, cd));
+        checkToString("[]", ArraySortedSet.intersect(ace, empty));
+        checkToString("[]", ArraySortedSet.intersect(empty, ace));
+        checkToString("[]", ArraySortedSet.intersect(empty, empty));
+        checkToString("[]", ArraySortedSet.intersect(ace, bdf));
+        checkToString("[e]", ArraySortedSet.intersect(ace, bde));
+    }
 }
 
 // End UtilTestCase.java

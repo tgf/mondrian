@@ -14,8 +14,7 @@ import mondrian.rolap.BitKey;
 import mondrian.rolap.RolapUtil;
 import mondrian.spi.SegmentColumn;
 import mondrian.spi.SegmentHeader;
-import mondrian.util.ByteString;
-import mondrian.util.PartiallyOrderedSet;
+import mondrian.util.*;
 
 import java.io.PrintWriter;
 import java.util.*;
@@ -58,6 +57,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
      */
     public SegmentCacheIndexImpl(Thread thread) {
         this.thread = thread;
+        assert thread != null;
     }
 
     public List<SegmentHeader> locate(
@@ -368,9 +368,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             measureName,
             compoundPredicates);
         final FactInfo factInfo = factMap.get(factKey);
-        List<List<SegmentHeader>> list = Collections.emptyList();
         if (factInfo == null) {
-            return list;
+            return Collections.emptyList();
         }
 
         // Iterate over all dimensionalities that are a superset of the desired
@@ -379,9 +378,9 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         // It helps that getAncestors returns dimensionalities with fewer bits
         // set first. These will contain fewer cells, and therefore be less
         // effort to roll up.
-        final List<SegmentHeader> matchingHeaders =
-            new ArrayList<SegmentHeader>();
 
+        final List<List<SegmentHeader>> list =
+            new ArrayList<List<SegmentHeader>>();
         final List<BitKey> ancestors =
             factInfo.bitkeyPoset.getAncestors(constrainedColsBitKey);
         for (BitKey bitKey : ancestors) {
@@ -401,57 +400,245 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             // Of the columns that are being aggregated away, are all of
             // them wildcarded? If so, this segment is a match. If not, we
             // will need to combine with other segments later.
-            matchingHeaders.clear();
-            headerLoop:
-            for (SegmentHeader header : headers) {
-                int nonWildcardCount = 0;
-                for (SegmentColumn column : header.getConstrainedColumns()) {
-                    final SegmentColumn constrainedColumn =
-                        header.getConstrainedColumn(
-                            column.columnExpression);
-
-                    // REVIEW: How are null key values represented in coords?
-                    // Assuming that they are represented by null ref.
-                    if (coords.containsKey(column.columnExpression)) {
-                        // Matching column. Will not be aggregated away. Needs
-                        // to be in range.
-                        Comparable<?> value =
-                            coords.get(column.columnExpression);
-                        if (value == null) {
-                            value = RolapUtil.sqlNullValue;
-                        }
-                        if (constrainedColumn.values != null
-                            && !constrainedColumn.values.contains(value))
-                        {
-                            continue headerLoop;
-                        }
-                    } else {
-                        // Non-matching column. Will be aggregated away. Needs
-                        // to be wildcarded (or some more complicated conditions
-                        // to be dealt with later).
-                        if (constrainedColumn.values != null) {
-                            ++nonWildcardCount;
-                        }
-                    }
-                }
-
-                if (nonWildcardCount == 0) {
-                    if (list.isEmpty()) {
-                        list = new ArrayList<List<SegmentHeader>>();
-                    }
-                    list.add(Collections.singletonList(header));
-                } else {
-                    matchingHeaders.add(header);
-                }
-            }
-
-            // TODO: Find combinations of segments that can roll up. Not
-            // possible if matchingHeaders is empty.
-            Util.discard(matchingHeaders);
+            findRollupCandidatesAmong(coords, list, headers);
         }
         return list;
     }
 
+    /**
+     * Finds rollup candidates among a list of headers with the same
+     * dimensionality.
+     * 
+     * <p>For each column that is being aggregated away, we need to ensure that
+     * we have all values of that column. If the column is wildcarded, it's
+     * easy. For example, if we wish to roll up to create Segment1:</p>
+     * 
+     * <pre>Segment1(Year=1997, MaritalStatus=*)</pre>
+     * 
+     * <p>then clearly Segment2:</p>
+     *
+     * <pre>Segment2(Year=1997, MaritalStatus=*, Gender=*, Nation=*)</pre>
+     * 
+     * <p>has all gender and Nation values. If the values are specified as a
+     * list:</p>
+     * 
+     * <pre>Segment3(Year=1997, MaritalStatus=*, Gender={M, F}, Nation=*)</pre>
+     * 
+     * <p>then we need to check the metadata. We see that Gender has two
+     * distinct values in the database, and we have two values, therefore we
+     * have all of them.</p>
+     * 
+     * <p>What if we have multiple non-wildcard columns? Consider:</p>
+     *
+     * <pre>
+     *     Segment4(Year=1997, MaritalStatus=*, Gender={M}, Nation={Mexico, USA})
+     *     Segment5(Year=1997, MaritalStatus=*, Gender={F}, Nation={USA})
+     *     Segment6(Year=1997, MaritalStatus=*, Gender={F, M}, Nation={Canada, Mexico, Honduras, Belize})
+     * </pre>
+     *
+     * <p>The problem is similar to finding whether a collection of rectangular
+     * regions covers a rectangle (or, generalizing to n dimensions, an
+     * n-cube). Or better, find a minimal collection of regions.</p>
+     *
+     * <p>Our algorithm solves it by iterating over all combinations of values.
+     * Those combinations are exponential in theory, but tractible in practice,
+     * using the following trick. The algorithm reduces the number of
+     * combinations by looking for values that are always treated the same. In
+     * the above, Canada, Honduras and Belize are always treated the same, so to
+     * prove covering, it is sufficient to prove that all combinations involving
+     * Canada are covered.</p>
+     *
+     * @param coords Coordinates
+     * @param list List to write candidates to
+     * @param headers Headers of candidate segments
+     */
+    private void findRollupCandidatesAmong(
+        Map<String, Comparable<?>> coords,
+        List<List<SegmentHeader>> list,
+        List<SegmentHeader> headers)
+    {
+        final List<Pair<SegmentHeader, List<SegmentColumn>>> matchingHeaders =
+            new ArrayList<Pair<SegmentHeader, List<SegmentColumn>>>();
+        headerLoop:
+        for (SegmentHeader header : headers) {
+            List<SegmentColumn> nonWildcards =
+                new ArrayList<SegmentColumn>();
+            for (SegmentColumn column : header.getConstrainedColumns()) {
+                final SegmentColumn constrainedColumn =
+                    header.getConstrainedColumn(column.columnExpression);
+
+                // REVIEW: How are null key values represented in coords?
+                // Assuming that they are represented by null ref.
+                if (coords.containsKey(column.columnExpression)) {
+                    // Matching column. Will not be aggregated away. Needs
+                    // to be in range.
+                    Comparable<?> value = coords.get(column.columnExpression);
+                    if (value == null) {
+                        value = RolapUtil.sqlNullValue;
+                    }
+                    if (constrainedColumn.values != null
+                        && !constrainedColumn.values.contains(value))
+                    {
+                        continue headerLoop;
+                    }
+                } else {
+                    // Non-matching column. Will be aggregated away. Needs
+                    // to be wildcarded (or some more complicated conditions
+                    // to be dealt with later).
+                    if (constrainedColumn.values != null) {
+                        nonWildcards.add(constrainedColumn);
+                    }
+                }
+            }
+
+            if (nonWildcards.isEmpty()) {
+                list.add(Collections.singletonList(header));
+            } else {
+                matchingHeaders.add(Pair.of(header, nonWildcards));
+            }
+        }
+
+        // Find combinations of segments that can roll up. Need at least two.
+        if (matchingHeaders.size() < 2) {
+            return;
+        }
+
+        // Collect the list of non-wildcarded columns.
+        final List<SegmentColumn> columnList = new ArrayList<SegmentColumn>();
+        final List<String> columnNameList = new ArrayList<String>();
+        for (Pair<SegmentHeader, List<SegmentColumn>> pair : matchingHeaders) {
+            for (SegmentColumn column : pair.right) {
+                if (!columnNameList.contains(column.columnExpression)) {
+                    final int valueCount = column.getValueCount();
+                    if (valueCount <= 0) {
+                        // Impossible to safely roll up. If we don't know the
+                        // number of values, we don't know that we have all of
+                        // them.
+                        return;
+                    }
+                    columnList.add(column);
+                    columnNameList.add(column.columnExpression);
+                }
+            }
+        }
+
+        // Gather known values of each column. For each value, remember which
+        // segments refer to it.
+        final List<List<Comparable>> valueLists =
+            new ArrayList<List<Comparable>>();
+        for (SegmentColumn column : columnList) {
+            // For each value, which equivalence class it belongs to.
+            final SortedMap<Comparable, BitSet> valueMap =
+                new TreeMap<Comparable, BitSet>();
+
+            int h = -1;
+            for (SegmentHeader header : Pair.leftIter(matchingHeaders)) {
+                ++h;
+                final SegmentColumn column1 =
+                    header.getConstrainedColumn(
+                        column.columnExpression);
+                for (Comparable<?> value : column1.getValues()) {
+                    BitSet bitSet = valueMap.get(value);
+                    if (bitSet == null) {
+                        bitSet = new BitSet();
+                        valueMap.put(value, bitSet);
+                    }
+                    bitSet.set(h);
+                }
+            }
+
+            // Is the number of values discovered equal to the known cardinality
+            // of the column? If not, we can't cover the space.
+            if (valueMap.size() < column.valueCount) {
+                return;
+            }
+
+            // Build equivalence sets of values. These group together values
+            // that are used identically in segments.
+            //
+            // For instance, given segments Sx over column c,
+            //
+            // S1: c = {1, 2, 3, 4}
+            // S2: c = {3, 4, 5}
+            // S3: c = {3, 6, 7, 8}
+            //
+            // the equivalence classes are:
+            //
+            // E1 = {1, 2} used in {S1}
+            // E2 = {3} used in {S1, S2, S3}
+            // E3 = {4} used in {S1, S2}
+            // E4 = {6, 7, 8} used in {S3}
+            //
+            // The equivalence classes reduce the size of the search space. (In
+            // this case, from 8 values to 4 classes.) We can use any value in a
+            // class to stand for all values.
+            final Map<BitSet, Comparable> eqclassPrimaryValues =
+                new HashMap<BitSet, Comparable>();
+            for (Map.Entry<Comparable, BitSet> entry : valueMap.entrySet()) {
+                final BitSet bitSet = entry.getValue();
+                if (!eqclassPrimaryValues.containsKey(bitSet)) {
+                    final Comparable value = entry.getKey();
+                    eqclassPrimaryValues.put(bitSet, value);
+                }
+            }
+            valueLists.add(
+                new ArrayList<Comparable>(
+                    eqclassPrimaryValues.values()));
+        }
+
+        // Iterate over every combination of values, and make sure that some
+        // segment can satisfy each.
+        //
+        // TODO: A greedy algorithm would probably be better. Rather than adding
+        // the first segment that contains a particular value combination, add
+        // the segment that contains the most value combinations that we are are
+        // not currently covering.
+        final CartesianProductList<Comparable> tuples =
+            new CartesianProductList(valueLists);
+        final List<SegmentHeader> usedSegments = new ArrayList<SegmentHeader>();
+        final List<SegmentHeader> unusedSegments =
+            new ArrayList<SegmentHeader>(headers);
+        tupleLoop:
+        for (List<Comparable> tuple : tuples) {
+            // If the value combination is handled by one of the used segments,
+            // great!
+            for (SegmentHeader segment : usedSegments) {
+                if (contains(segment, tuple, columnNameList)) {
+                    continue tupleLoop;
+                }
+            }
+            // Does one of the unused segments contain it? Use the first one we
+            // find.
+            for (SegmentHeader segment : unusedSegments) {
+                if (contains(segment, tuple, columnNameList)) {
+                    unusedSegments.remove(segment);
+                    usedSegments.add(segment);
+                    continue tupleLoop;
+                }
+            }
+            // There was a value combination not contained in any of the
+            // segments. Fail.
+            return;
+        }
+        list.add(usedSegments);
+    }
+
+    private boolean contains(
+        SegmentHeader segment,
+        List<Comparable> values,
+        List<String> columns)
+    {
+        for (int i = 0; i < columns.size(); i++) {
+            String columnName = columns.get(i);
+            final SegmentColumn column =
+                segment.getConstrainedColumn(columnName);
+            final SortedSet<Comparable<?>> valueSet = column.getValues();
+            if (valueSet != null && !valueSet.contains(values.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private static class FactInfo {
         private static final PartiallyOrderedSet.Ordering<BitKey> ORDERING =

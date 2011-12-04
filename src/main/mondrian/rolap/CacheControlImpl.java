@@ -461,6 +461,7 @@ public class CacheControlImpl implements CacheControl {
                             list.add(
                                 new SegmentColumn(
                                     entry.getKey(),
+                                    -1,
                                     null));
                         } else {
                             Arrays.sort(
@@ -469,10 +470,12 @@ public class CacheControlImpl implements CacheControl {
                             list.add(
                                 new SegmentColumn(
                                     entry.getKey(),
+                                    -1,
                                     new ArraySortedSet(keys)));
                         }
                     }
                 }
+
                 public void visit(MemberRangeCellRegion region) {
                     // We translate all ranges into wildcards.
                     // FIXME Optimize this by resolving the list of members
@@ -480,6 +483,7 @@ public class CacheControlImpl implements CacheControl {
                     list.add(
                         new SegmentColumn(
                             region.level.getKeyExp().getGenericExpression(),
+                            -1,
                             null));
                 }
             };

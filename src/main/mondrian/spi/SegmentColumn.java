@@ -30,14 +30,22 @@ import java.util.SortedSet;
 public class SegmentColumn implements Serializable {
     private static final long serialVersionUID = -5227838916517784720L;
     public final String columnExpression;
+    public final int valueCount;
     public final SortedSet<Comparable<?>> values;
     private final int hashCode;
 
     /**
-     * Creates a ConstrainedColumn.
+     * Creates a SegmentColumn.
      *
-     * @param columnExpression Name of the source table into which the
-     * constrained column is, as defined in the Mondrian schema.
+     * @param columnExpression SQL expression for the column. Unique within the
+     *     star schema, including accesses to the same physical column via
+     *     different join paths.
+     *
+     * @param valueCount Number of distinct values of this column in the
+     *     database. For these purposes, null is counted as a value. If there
+     *     are N distinct values of the column, and we have a collection of
+     *     segments that cover N values, then Mondrian assumes that it is safe
+     *     to roll up.
      *
      * @param valueList List of values to constrain the
      *     column to, or null if unconstrained. Values must be
@@ -46,9 +54,11 @@ public class SegmentColumn implements Serializable {
      */
     public SegmentColumn(
         String columnExpression,
+        int valueCount,
         SortedSet<Comparable<?>> valueList)
     {
         this.columnExpression = columnExpression;
+        this.valueCount = valueCount;
         this.values = valueList;
         int hash = super.hashCode();
         hash = Util.hash(hash, this.columnExpression);
@@ -61,8 +71,8 @@ public class SegmentColumn implements Serializable {
     }
 
     /**
-     * Merged the current constrained column with another
-     * resulting in a super set of both.
+     * Merges this column with another
+     * resulting in another whose values are super set of both.
      */
     public SegmentColumn merge(SegmentColumn col) {
         assert col != null;
@@ -72,13 +82,15 @@ public class SegmentColumn implements Serializable {
         if (this.values == null || col.values == null) {
             return new SegmentColumn(
                 columnExpression,
+                valueCount,
                 null);
         }
 
         return new SegmentColumn(
             columnExpression,
-            ((ArraySortedSet)this.values).merge(
-                (ArraySortedSet)col.values));
+            valueCount,
+            ((ArraySortedSet) this.values).merge(
+                (ArraySortedSet) col.values));
     }
 
     /**
@@ -114,5 +126,25 @@ public class SegmentColumn implements Serializable {
     public int hashCode() {
         return hashCode;
     }
+
+    /**
+     * Returns the number of distinct values that occur for this column in the
+     * database.
+     *
+     * <p>Mondrian uses this to know that it can safely combine multiple
+     * segments to roll up. For example, if for the "quarter" column, one
+     * segment has values {"Q1", "Q2"} and another has values {"Q3", "Q4"},
+     * and Mondrian knows that there are 4 values, then it can roll up.
+     *
+     * <p>If this method returns a value that is too low, Mondrian may generate
+     * incorrect results. If you don't know the number of values, return -1.</p>
+     *
+     * @return Number of distinct values, including null, that occur for this
+     * column
+     */
+    public int getValueCount() {
+        return valueCount;
+    }
 }
+
 // End SegmentColumn.java

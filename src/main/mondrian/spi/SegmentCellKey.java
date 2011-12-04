@@ -3,10 +3,9 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
-// All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
+// Copyright (C) 2011-2011 Julian Hyde and others
+// All Rights Reserved.
 */
 package mondrian.spi;
 
@@ -42,7 +41,7 @@ public class SegmentCellKey implements Serializable {
     private final int[] pos;
     private final int hash;
     public SegmentCellKey(int[] pos) {
-        this.pos = Arrays.copyOf(pos, pos.length);
+        this.pos = pos.clone();
         int h = 17;
         for (int ordinal : this.pos) {
             h = Util.hash(h, ordinal);
@@ -65,4 +64,5 @@ public class SegmentCellKey implements Serializable {
         return pos.length;
     }
 }
+
 // End SegmentCellKey.java

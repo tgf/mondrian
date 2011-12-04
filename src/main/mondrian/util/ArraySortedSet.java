@@ -224,6 +224,52 @@ public class ArraySortedSet<E extends Comparable<E>>
         return o != null
             && Util.binarySearch(values, start, end, (E) o) >= 0;
     }
+
+    /*
+    * TODO: Factor this out into ArraySortedSet or Util.
+    */
+    public static <E extends Comparable> SortedSet<E> intersect(
+        SortedSet<E> set1,
+        SortedSet<E> set2)
+    {
+        if (!(set1 instanceof ArraySortedSet)
+            || !(set2 instanceof ArraySortedSet)) {
+                final TreeSet<E> set = new TreeSet<E>(set1);
+                set.removeAll(set2);
+                return set;
+            }
+        final Iterator<E> it1 = set1.iterator();
+        final Iterator<E> it2 = set2.iterator();
+        final Comparable<?>[] result =
+            new Comparable[Math.min(set1.size(), set2.size())];
+        int i = 0;
+        if (result.length > 0) {
+        E e1 = it1.next();
+        E e2 = it2.next();
+        for (;;) {
+            final int compare = e1.compareTo(e2);
+            if (compare == 0) {
+                result[i++] = e1;
+                if (!it1.hasNext() || !it2.hasNext()) {
+                    break;
+                }
+                e1 = it1.next();
+                e2 = it2.next();
+            } else if (compare == 1) {
+                if (!it2.hasNext()) {
+                    break;
+                }
+                e2 = it2.next();
+            } else {
+                if (!it1.hasNext()) {
+                    break;
+                }
+                e1 = it1.next();
+            }
+        }
+        }
+        return new ArraySortedSet(result, 0, i);
+    }
 }
 
 // End ArraySortedSet.java
