@@ -18,6 +18,7 @@ import mondrian.util.*;
 
 import java.io.PrintWriter;
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * Data structure that identifies which segments contain cells.
@@ -537,13 +538,25 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                 final SegmentColumn column1 =
                     header.getConstrainedColumn(
                         column.columnExpression);
-                for (Comparable<?> value : column1.getValues()) {
-                    BitSet bitSet = valueMap.get(value);
-                    if (bitSet == null) {
-                        bitSet = new BitSet();
-                        valueMap.put(value, bitSet);
+                if (column1.getValues() == null) {
+                    // Wildcard. Mark all values as present.
+                    for (Entry<Comparable, BitSet> entry : valueMap.entrySet()) {
+                        for (int pos = 0;
+                            pos < entry.getValue().cardinality();
+                            pos++)
+                        {
+                            entry.getValue().set(pos);
+                        }
                     }
-                    bitSet.set(h);
+                } else {
+                    for (Comparable<?> value : column1.getValues()) {
+                        BitSet bitSet = valueMap.get(value);
+                        if (bitSet == null) {
+                            bitSet = new BitSet();
+                            valueMap.put(value, bitSet);
+                        }
+                        bitSet.set(h);
+                    }
                 }
             }
 

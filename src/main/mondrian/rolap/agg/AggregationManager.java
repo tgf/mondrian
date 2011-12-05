@@ -491,11 +491,13 @@ System.out.println(buf.toString());
     }
 
     public void shutdown() {
+        // Send a shutdown command and wait for it to return.
+        cacheMgr.shutdown();
+        // Now we can cleanup.
         for (SegmentCacheWorker worker : segmentCacheWorkers) {
             worker.shutdown();
         }
         sqlExecutor.shutdown();
-        cacheMgr.shutdown();
     }
 
     /**

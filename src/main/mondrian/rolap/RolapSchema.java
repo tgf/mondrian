@@ -333,12 +333,15 @@ public class RolapSchema implements Schema {
     }
 
     protected void finalCleanUp() {
-        final CacheControl cacheControl =
-            internalConnection.getCacheControl(null);
-        for (Cube cube : getCubes()) {
-            CellRegion cr =
-                cacheControl.createMeasuresRegion(cube);
-            cacheControl.flush(cr);
+        if (internalConnection != null) {
+            // REVIEW: Is this supposed to happen???
+            final CacheControl cacheControl =
+                internalConnection.getCacheControl(null);
+            for (Cube cube : getCubes()) {
+                CellRegion cr =
+                    cacheControl.createMeasuresRegion(cube);
+                cacheControl.flush(cr);
+            }
         }
         if (aggTableManager != null) {
             aggTableManager.finalCleanUp();
