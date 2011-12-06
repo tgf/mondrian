@@ -18,6 +18,7 @@ import mondrian.test.TestContext;
 import mondrian.util.Bug;
 
 import java.util.*;
+import java.util.concurrent.Future;
 
 /**
  * Test for <code>FastBatchingCellReader</code>.
@@ -1124,7 +1125,10 @@ public class FastBatchingCellReaderTest extends BatchTestCase {
         assertFalse(secondBatch.canBatch(firstBatch));
     }
 
-    public void testCompositeBatchLoadAggregation() {
+    public void testCompositeBatchLoadAggregation() throws Exception {
+        if (!getTestContext().getDialect().supportsGroupingSets()) {
+            return;
+        }
         final FastBatchingCellReader fbcr =
             new FastBatchingCellReader(e, salesCube);
 
@@ -1162,38 +1166,21 @@ public class FastBatchingCellReaderTest extends BatchTestCase {
                 cubeNameSales,
                 measureUnitSales);
 
-        final List<GroupingSet> groupingSets =
-            new ArrayList<GroupingSet>();
         FastBatchingCellReader.CompositeBatch compositeBatch =
-            fbcr.new CompositeBatch(detailedBatch) {
-                SegmentLoader getSegmentLoader() {
-                    return new SegmentLoader(fbcr.aggMgr) {
-                        public void load(
-                            int cellRequestCount,
-                            List<GroupingSet> sets,
-                            RolapAggregationManager.PinSet pinnedSegments,
-                            List<StarPredicate> compoundPredicateList)
-                        {
-                            groupingSets.addAll(sets);
-                            for (GroupingSet groupingSet : sets) {
-                                groupingSet.setSegmentsFailed();
-                            }
-                        }
-                    };
-                }
-            };
+            fbcr.new CompositeBatch(detailedBatch);
 
         compositeBatch.add(summaryBatch);
 
-        compositeBatch.loadAggregation();
+        List<Future<SegmentWithData>> segments =
+            compositeBatch.loadAggregation();
 
-        assertEquals(2, groupingSets.size());
+        assertEquals(2, segments.size());
         assertEquals(
             detailedBatch.getConstrainedColumnsBitKey(),
-            groupingSets.get(0).getLevelBitKey());
+            segments.get(0).get().getConstrainedColumnsBitKey());
         assertEquals(
             summaryBatch.getConstrainedColumnsBitKey(),
-            groupingSets.get(1).getLevelBitKey());
+            segments.get(1).get().getConstrainedColumnsBitKey());
     }
 
     /**
