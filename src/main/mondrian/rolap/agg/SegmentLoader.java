@@ -106,18 +106,22 @@ public class SegmentLoader {
                 list.add(future);
             }
         }
-        aggMgr.sqlExecutor.execute(
-            new SegmentLoadCommand(
-                Locus.peek(),
-                this,
-                cellRequestCount,
-                groupingSets,
-                compoundPredicateList,
-                map));
+        try {
+            aggMgr.sqlExecutor.submit(
+                new SegmentLoadCommand(
+                    Locus.peek(),
+                    this,
+                    cellRequestCount,
+                    groupingSets,
+                    compoundPredicateList,
+                    map)).get();
+        } catch (Exception e) {
+            throw new MondrianException(e);
+        }
         return Collections.unmodifiableList(list);
     }
 
-    private static class SegmentLoadCommand implements Runnable {
+    private static class SegmentLoadCommand implements Callable<Void> {
         private final Locus locus;
         private final SegmentLoader segmentLoader;
         private final int cellRequestCount;
@@ -141,7 +145,7 @@ public class SegmentLoader {
             this.segmentSlotMap = segmentSlotMap;
         }
 
-        public void run() {
+        public Void call() throws Exception {
             Locus.push(locus);
             try {
                 segmentLoader.loadImpl(
@@ -149,13 +153,10 @@ public class SegmentLoader {
                     groupingSets,
                     compoundPredicateList,
                     segmentSlotMap);
-            } catch (Throwable e) {
-                // Argh! What to do with this? We're returning a
-                // list-of-futures; do we put the exception in each list item?
-                e.printStackTrace();
             } finally {
                 Locus.pop(locus);
             }
+            return null;
         }
     }
 
