@@ -489,21 +489,23 @@ public class FastBatchingCellReader implements CellReader {
         List<Batch> batchList =
             new ArrayList<Batch>(batches.values());
         Collections.sort(batchList, BatchComparator.instance);
+        final List<Future<SegmentWithData>> list =
+            new ArrayList<Future<SegmentWithData>>();
         if (shouldUseGroupingFunction()) {
             LOGGER.debug("Using grouping sets");
             List<CompositeBatch> groupedBatches = groupBatches(batchList);
             for (CompositeBatch batch : groupedBatches) {
-                loadAggregation(batch);
+                list.addAll(loadAggregation(batch));
             }
         } else {
             // Load batches in turn.
             for (Batch batch : batchList) {
-                loadAggregation(batch);
+                list.addAll(loadAggregation(batch));
             }
         }
 
-        final List<Future<SegmentWithData>> list =
-            new ArrayList<Future<SegmentWithData>>(futureSegments);
+        list.addAll(futureSegments);
+
         futureSegments.clear();
         segmentHeaderResults.clear();
         batches.clear();
@@ -517,11 +519,11 @@ public class FastBatchingCellReader implements CellReader {
         return list;
     }
 
-    private void loadAggregation(Loadable batch) {
+    private List<Future<SegmentWithData>> loadAggregation(Loadable batch) {
         if (execution != null) {
             execution.checkCancelOrTimeout();
         }
-        batch.loadAggregation();
+        return batch.loadAggregation();
     }
 
     List<CompositeBatch> groupBatches(List<Batch> batchList) {
@@ -701,7 +703,7 @@ public class FastBatchingCellReader implements CellReader {
             summaryBatches.addAll(summaryBatch.summaryBatches);
         }
 
-        public void loadAggregation() {
+        public List<Future<SegmentWithData>> loadAggregation() {
             GroupingSetsCollector batchCollector =
                 new GroupingSetsCollector(true);
             this.detailedBatch.loadAggregation(batchCollector);
@@ -712,7 +714,7 @@ public class FastBatchingCellReader implements CellReader {
                 cellRequestCount += batch.cellRequestCount;
             }
 
-            getSegmentLoader().load(
+            return getSegmentLoader().load(
                 cellRequestCount,
                 batchCollector.getGroupingSets(),
                 detailedBatch.batchKey.getCompoundPredicateList());
@@ -731,7 +733,7 @@ public class FastBatchingCellReader implements CellReader {
      * aggregations into the cache.
      */
     interface Loadable {
-        void loadAggregation();
+        List<Future<SegmentWithData>> loadAggregation();
     }
 
     public class Batch implements Loadable {
@@ -810,13 +812,13 @@ public class FastBatchingCellReader implements CellReader {
             return batchKey.getConstrainedColumnsBitKey();
         }
 
-        public final void loadAggregation() {
+        public final List<Future<SegmentWithData>> loadAggregation() {
             GroupingSetsCollector collectorWithGroupingSetsTurnedOff =
                 new GroupingSetsCollector(false);
-            loadAggregation(collectorWithGroupingSetsTurnedOff);
+            return loadAggregation(collectorWithGroupingSetsTurnedOff);
         }
 
-        final void loadAggregation(
+        final List<Future<SegmentWithData>> loadAggregation(
             GroupingSetsCollector groupingSetsCollector)
         {
             if (MondrianProperties.instance().GenerateAggregateSql.get()) {
@@ -894,6 +896,8 @@ public class FastBatchingCellReader implements CellReader {
                 BATCH_LOGGER.debug(
                     "Batch.loadAggregation (millis) " + (t2 - t1));
             }
+
+            return futureSegments;
         }
 
         private void doSpecialHandlingOfDistinctCountMeasures(
