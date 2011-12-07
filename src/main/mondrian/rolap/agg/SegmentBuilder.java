@@ -185,7 +185,6 @@ public class SegmentBuilder {
             int src;
             boolean lostPredicate;
         }
-
         final SegmentHeader firstHeader = map.keySet().iterator().next();
         final AxisInfo[] axes =
             new AxisInfo[keepColumns.size()];
@@ -240,6 +239,8 @@ public class SegmentBuilder {
             }
         }
 
+        // XXXXXXXX
+
         // Populate cells.
         //
         // (This is a rough implementation, very inefficient. It makes all
@@ -252,8 +253,8 @@ public class SegmentBuilder {
         // We should do really efficient rollup if the source is an array: we
         // should box values (e.g double to Double and back), and we should read
         // a stripe of values from the and add them up into a single cell.
-        final Map<SegmentCellKey, List<Object>> cellValues =
-            new HashMap<SegmentCellKey, List<Object>>();
+        final Map<CellKey, List<Object>> cellValues =
+            new HashMap<CellKey, List<Object>>();
         for (Map.Entry<SegmentHeader, SegmentBody> entry : map.entrySet()) {
             final int[] pos = new int[axes.length];
             final Comparable<?>[][] valueArrays =
@@ -270,10 +271,10 @@ public class SegmentBuilder {
                         : null;
                 ++z;
             }
-            Map<SegmentCellKey, Object> v = body.getValueMap();
-            for (Map.Entry<SegmentCellKey, Object> vEntry : v.entrySet()) {
+            Map<CellKey, Object> v = body.getValueMap();
+            for (Map.Entry<CellKey, Object> vEntry : v.entrySet()) {
                 z = 0;
-                for (int i = 0; i < vEntry.getKey().getArrity(); i++) {
+                for (int i = 0; i < vEntry.getKey().size(); i++) {
                     final Comparable<?>[] valueArray = valueArrays[i];
                     if (valueArray == null) {
                         continue;
@@ -292,7 +293,7 @@ public class SegmentBuilder {
                     }
                     pos[z++] = targetOrdinal;
                 }
-                final SegmentCellKey ck = new SegmentCellKey(pos);
+                final CellKey ck = CellKey.Generator.newCellKey(pos);
                 if (!cellValues.containsKey(ck)) {
                     cellValues.put(ck, new ArrayList<Object>());
                 }
@@ -332,7 +333,7 @@ public class SegmentBuilder {
             // First, aggregate the values of each key.
             final Map<CellKey, Object> data =
                 new HashMap<CellKey, Object>();
-            for (Entry<SegmentCellKey, List<Object>> entry
+            for (Entry<CellKey, List<Object>> entry
                 : cellValues.entrySet())
             {
                 data.put(
@@ -350,7 +351,7 @@ public class SegmentBuilder {
                 cellValues.entrySet().iterator().next().getValue().get(0);
             if (peek instanceof Double) {
                 final double[] data = new double[nbValues];
-                for (Entry<SegmentCellKey, List<Object>> entry
+                for (Entry<CellKey, List<Object>> entry
                     : cellValues.entrySet())
                 {
                     final int offset =
@@ -366,7 +367,7 @@ public class SegmentBuilder {
                         axisList);
             } else if (peek instanceof Integer) {
                 final int[] data = new int[cellValues.size()];
-                for (Entry<SegmentCellKey, List<Object>> entry
+                for (Entry<CellKey, List<Object>> entry
                     : cellValues.entrySet())
                 {
                     final int offset =
@@ -382,7 +383,7 @@ public class SegmentBuilder {
                         axisList);
             } else {
                 final Object[] data = new Object[cellValues.size()];
-                for (Entry<SegmentCellKey, List<Object>> entry
+                for (Entry<CellKey, List<Object>> entry
                     : cellValues.entrySet())
                 {
                     final int offset =

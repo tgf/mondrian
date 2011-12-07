@@ -9,8 +9,8 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.rolap.CellKey;
 import mondrian.spi.SegmentBody;
-import mondrian.spi.SegmentCellKey;
 import mondrian.util.Pair;
 
 import java.util.*;
@@ -49,11 +49,11 @@ abstract class AbstractSegmentBody implements SegmentBody {
         return nullAxisFlags;
     }
 
-    public Map<SegmentCellKey, Object> getValueMap() {
-        return new AbstractMap<SegmentCellKey, Object>() {
-            public Set<Entry<SegmentCellKey, Object>> entrySet() {
-                return new AbstractSet<Entry<SegmentCellKey, Object>>() {
-                    public Iterator<Entry<SegmentCellKey, Object>> iterator() {
+    public Map<CellKey, Object> getValueMap() {
+        return new AbstractMap<CellKey, Object>() {
+            public Set<Entry<CellKey, Object>> entrySet() {
+                return new AbstractSet<Entry<CellKey, Object>>() {
+                    public Iterator<Entry<CellKey, Object>> iterator() {
                         return new SegmentBodyIterator();
                     }
 
@@ -84,7 +84,7 @@ abstract class AbstractSegmentBody implements SegmentBody {
      * Iterator over all (cellkey, value) pairs in this data set.
      */
     private class SegmentBodyIterator
-        implements Iterator<Map.Entry<SegmentCellKey, Object>>
+        implements Iterator<Map.Entry<CellKey, Object>>
     {
         private int i = -1;
         private final int[] ordinals;
@@ -102,9 +102,9 @@ abstract class AbstractSegmentBody implements SegmentBody {
             return hasNext;
         }
 
-        public Map.Entry<SegmentCellKey, Object> next() {
-            Pair<SegmentCellKey, Object> o =
-                Pair.of(new SegmentCellKey(ordinals), next);
+        public Map.Entry<CellKey, Object> next() {
+            Pair<CellKey, Object> o =
+                Pair.of(CellKey.Generator.newCellKey(ordinals), next);
             moveToNext();
             return o;
         }

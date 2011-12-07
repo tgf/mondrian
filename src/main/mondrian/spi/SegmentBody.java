@@ -13,6 +13,8 @@ package mondrian.spi;
 import java.io.Serializable;
 import java.util.*;
 
+import mondrian.rolap.CellKey;
+
 /**
  * SegmentBody is the object which contains the cached data of a
  * Segment. They are stored inside a {@link mondrian.spi.SegmentCache}
@@ -30,7 +32,7 @@ public interface SegmentBody extends Serializable {
      *
      * @return Map containing cell values keyed by their coordinates
      */
-    Map<SegmentCellKey, Object> getValueMap();
+    Map<CellKey, Object> getValueMap();
 
     /**
      * Returns an array of values. Use only for dense segments.
