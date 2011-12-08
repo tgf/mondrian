@@ -583,7 +583,7 @@ public interface CellKey extends Serializable {
         }
 
         public int size() {
-            return 3;
+            return 4;
         }
 
         public int[] getOrdinals() {
@@ -591,7 +591,7 @@ public interface CellKey extends Serializable {
         }
 
         public void setOrdinals(int[] pos) {
-            if (pos.length != 3) {
+            if (pos.length != 4) {
                 throw new IllegalArgumentException();
             }
             ordinal0 = pos[0];
