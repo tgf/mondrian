@@ -75,7 +75,16 @@ public class DelegatingTupleList extends AbstractTupleList
                 return list.size();
             }
             public Member set(int index, Member element) {
-                return list.get(index).set(column, element);
+                List<Member> subList = list.get(index);
+                if (subList.size() == 1) {
+                    // The sub list is probably a singleton list.
+                    // calling set() on it will fail. We have to
+                    // create a new singleton list.
+                    return 
+                        list.set(index, Collections.singletonList(element))
+                            .get(0);
+                }
+                return subList.set(column, element);
             };
         };
     }
