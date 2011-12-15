@@ -11829,7 +11829,8 @@ Intel platforms):
     }
 
     /**
-     * Test for MONDRIAN-1050.
+     * Test for http://jira.pentaho.com/browse/MONDRIAN-1050
+     * <p>MDX Order function fails when using DateTime expression for ordering
      */
     public void testDateParameter() throws Exception {
         executeQuery(
@@ -11837,7 +11838,11 @@ Intel platforms):
     }
 
     /**
-     * Test for MONDRIAN-1043
+     * Test for http://jira.pentaho.com/browse/MONDRIAN-1043
+     * p>A user reported that the Hierarchyze MDX function sorts the members
+     * differently when using Except within it. This test makes sure that
+     * Hierarchyze and Except can be used within each other and that the
+     * sort order is maintained.
      */
     public void testHierarchyzeExcept() throws Exception {
         final String[] mdxA =
