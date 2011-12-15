@@ -384,7 +384,7 @@ public class RolapLevel extends LevelBase {
             list.add(
                 new RolapProperty(
                     Property.NAME.name, Property.Datatype.TYPE_STRING,
-                    nameExp, null, null, null, true));
+                    nameExp, null, null, null, true, Property.NAME.description));
         }
         for (int i = 0; i < xmlLevel.properties.length; i++) {
             MondrianDef.Property xmlProperty = xmlLevel.properties[i];
@@ -427,7 +427,8 @@ public class RolapLevel extends LevelBase {
                     formatter,
                     xmlProperty.caption,
                     xmlLevel.properties[i].dependsOnLevelValue,
-                    false));
+                    false,
+                    xmlProperty.description));
         }
         return list.toArray(new RolapProperty[list.size()]);
     }
