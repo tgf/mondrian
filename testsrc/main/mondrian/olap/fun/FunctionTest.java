@@ -11474,8 +11474,9 @@ Intel platforms):
     }
 
     /**
-     * Test for bug MONDRIAN-296, "Cube getTimeDimension use when Cube has no
-     * Time dimension".
+     * Testcase for bug <a href="http://jira.pentaho.com/browse/MONDRIAN-296">
+     * MONDRIAN-296, "Cube getTimeDimension use when Cube has no Time
+     * dimension"</a>.
      */
     public void testCubeTimeDimensionFails() {
         assertQueryThrows(
@@ -11829,8 +11830,9 @@ Intel platforms):
     }
 
     /**
-     * Test for http://jira.pentaho.com/browse/MONDRIAN-1050
-     * <p>MDX Order function fails when using DateTime expression for ordering
+     * Testcase for bug <a href="http://jira.pentaho.com/browse/MONDRIAN-1050">
+     * MONDRIAN-1050, "MDX Order function fails when using DateTime expression
+     * for ordering"</a>.
      */
     public void testDateParameter() throws Exception {
         executeQuery(
@@ -11838,13 +11840,15 @@ Intel platforms):
     }
 
     /**
-     * Test for http://jira.pentaho.com/browse/MONDRIAN-1043
-     * p>A user reported that the Hierarchyze MDX function sorts the members
-     * differently when using Except within it. This test makes sure that
-     * Hierarchyze and Except can be used within each other and that the
-     * sort order is maintained.
+     * Testcase for bug <a href="http://jira.pentaho.com/browse/MONDRIAN-1043">
+     * MONDRIAN-1043, "Hierarchize with Except sort set members differently than
+     * in Mondrian 3.2.1"</a>.
+     *
+     * <p>This test makes sure that
+     * Hierarchize and Except can be used within each other and that the
+     * sort order is maintained.</p>
      */
-    public void testHierarchyzeExcept() throws Exception {
+    public void testHierarchizeExcept() throws Exception {
         final String[] mdxA =
             new String[] {
                 "SELECT {[Measures].[Unit Sales], [Measures].[Store Sales]} ON COLUMNS, Hierarchize(Except({[Customers].[USA].Children, [Customers].[USA].[CA].Children}, [Customers].[USA].[CA])) ON ROWS FROM [Sales]",
