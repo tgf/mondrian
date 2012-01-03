@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2002-2011 Julian Hyde and others
+// Copyright (C) 2002-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -48,15 +48,15 @@ public class SegmentLoader {
 
     private final static Logger LOGGER = Logger.getLogger(SegmentLoader.class);
 
-    private final AggregationManager aggMgr;
+    private final SegmentCacheManager cacheMgr;
 
     /**
      * Creates a SegmentLoader.
      *
-     * @param aggMgr Aggregation manager
+     * @param cacheMgr Cache manager
      */
-    public SegmentLoader(AggregationManager aggMgr) {
-        this.aggMgr = aggMgr;
+    public SegmentLoader(SegmentCacheManager cacheMgr) {
+        this.cacheMgr = cacheMgr;
     }
 
     /**
@@ -76,7 +76,7 @@ public class SegmentLoader {
      * grouping sets.
      *
      * <p>The <code>groupingSets</code> list should be topological order, with
-     * more detailed higher-level grouping sets occuring first. In other words,
+     * more detailed higher-level grouping sets occurring first. In other words,
      * the first element of the list should always be the detailed grouping
      * set (default grouping set), followed by grouping sets which can be
      * rolled-up on this detailed grouping set.
@@ -88,83 +88,81 @@ public class SegmentLoader {
      *
      * @param cellRequestCount Number of missed cells that led to this request
      * @param groupingSets   List of grouping sets whose segments are loaded
+     * @param compoundPredicateList Compound predicates
+     * @param segmentFutures List of futures wherein each statement will place
+     *                       a list of the segments it has loaded, when it
+     *                       completes
      */
-    public List<Future<SegmentWithData>> load(
+    public void load(
         int cellRequestCount,
         List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList)
+        List<StarPredicate> compoundPredicateList,
+        List<Future<Map<Segment, SegmentWithData>>> segmentFutures)
     {
-        final Map<Segment, SlotFuture<SegmentWithData>> map =
-            new IdentityHashMap<Segment, SlotFuture<SegmentWithData>>();
-        final List<Future<SegmentWithData>> list =
-            new ArrayList<Future<SegmentWithData>>();
         for (GroupingSet groupingSet : groupingSets) {
             for (Segment segment : groupingSet.getSegments()) {
-                final SlotFuture<SegmentWithData> future =
-                    new SlotFuture<SegmentWithData>();
-                map.put(segment, future);
-                list.add(future);
+                cacheMgr.segmentIndex.add(
+                    segment.getHeader(),
+                    new SlotFuture<SegmentBody>(),
+                    new SegmentBuilder.StarSegmentConverter(
+                        segment.measure,
+                        compoundPredicateList));
             }
         }
         try {
-            aggMgr.sqlExecutor.submit(
-                new SegmentLoadCommand(
-                    Locus.peek(),
-                    this,
-                    cellRequestCount,
-                    groupingSets,
-                    compoundPredicateList,
-                    map)).get();
+            segmentFutures.add(
+                cacheMgr.sqlExecutor.submit(
+                    new SegmentLoadCommand(
+                        Locus.peek(),
+                        this,
+                        cellRequestCount,
+                        groupingSets,
+                        compoundPredicateList)));
         } catch (Exception e) {
             throw new MondrianException(e);
         }
-        return Collections.unmodifiableList(list);
     }
 
-    private static class SegmentLoadCommand implements Callable<Void> {
+    private static class SegmentLoadCommand
+        implements Callable<Map<Segment, SegmentWithData>>
+    {
         private final Locus locus;
         private final SegmentLoader segmentLoader;
         private final int cellRequestCount;
         private final List<GroupingSet> groupingSets;
         private final List<StarPredicate> compoundPredicateList;
-        private final Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap;
 
         public SegmentLoadCommand(
             Locus locus,
             SegmentLoader segmentLoader,
             int cellRequestCount,
             List<GroupingSet> groupingSets,
-            List<StarPredicate> compoundPredicateList,
-            Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
+            List<StarPredicate> compoundPredicateList)
         {
             this.locus = locus;
             this.segmentLoader = segmentLoader;
             this.cellRequestCount = cellRequestCount;
             this.groupingSets = groupingSets;
             this.compoundPredicateList = compoundPredicateList;
-            this.segmentSlotMap = segmentSlotMap;
         }
 
-        public Void call() throws Exception {
+        public Map<Segment, SegmentWithData> call() throws Exception {
             Locus.push(locus);
             try {
-                segmentLoader.loadImpl(
+                return segmentLoader.loadImpl(
                     cellRequestCount,
                     groupingSets,
-                    compoundPredicateList,
-                    segmentSlotMap);
+                    compoundPredicateList);
             } finally {
                 Locus.pop(locus);
             }
-            return null;
         }
     }
 
-    private void loadImpl(
+    private Map<Segment, SegmentWithData> loadImpl(
         int cellRequestCount,
         List<GroupingSet> groupingSets,
-        List<StarPredicate> compoundPredicateList,
-        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
+        List<StarPredicate> compoundPredicateList)
     {
         // Simple assertion. Is this Execution instance still valid,
         // or should we get outa here.
@@ -176,6 +174,9 @@ public class SegmentLoader {
         RolapStar.Column[] defaultColumns =
             groupingSetsList.getDefaultColumns();
 
+        final Map<Segment, SegmentWithData> segmentMap =
+            new HashMap<Segment, SegmentWithData>();
+        Throwable throwable = null;
         try {
             int arity = defaultColumns.length;
             SortedSet<Comparable<?>>[] axisValueSets =
@@ -214,32 +215,27 @@ public class SegmentLoader {
             setDataToSegments(
                 groupingSetsList,
                 groupingDataSetsMap,
-                compoundPredicateList,
-                segmentSlotMap);
+                segmentMap);
+
+            return segmentMap;
+        } catch (RuntimeException e) {
+            throwable = e;
+            throw e;
         } catch (Error e) {
-            // Any segments which are still loading have failed. If all have
-            // finished, we have no way to pass back the error, so throw.
-            if (!setFailOnStillLoadingSegments(
-                    segmentSlotMap, groupingSetsList, e))
-            {
-                throw e;
-            }
+            throwable = e;
+            throw e;
         } catch (Throwable e) {
+            throwable = e;
             if (stmt == null) {
                 throw new MondrianException(e);
             }
-            // Any segments which are still loading have failed. If all have
-            // finished, we have no way to pass back the error, so throw.
-            RuntimeException rte = stmt.handle(e);
-            if (!setFailOnStillLoadingSegments(
-                    segmentSlotMap, groupingSetsList, rte))
-            {
-                throw rte;
-            }
+            throw stmt.handle(e);
         } finally {
             if (stmt != null) {
                 stmt.close();
             }
+            setFailOnStillLoadingSegments(
+                segmentMap, groupingSetsList, throwable);
         }
     }
 
@@ -247,40 +243,42 @@ public class SegmentLoader {
      * Called when a segment has been loaded from SQL, to put into the segment
      * index and the external cache.
      *
-     * @param segment Loaded segment
+     * @param header Segment header
+     * @param body Segment body
      */
     private void cacheSegment(
-        final SegmentWithData segment)
+        SegmentHeader header,
+        SegmentBody body)
     {
-        final SegmentHeader header = segment.getHeader();
-        final SegmentBody body =
-            segment.getData().createSegmentBody(
-                new AbstractList<Pair<SortedSet<Comparable<?>>, Boolean>>() {
-                    public Pair<SortedSet<Comparable<?>>, Boolean> get(
-                        int index)
-                    {
-                        return segment.axes[index].getValuesAndIndicator();
-                    }
+        cacheMgr.loadSucceeded(header, body);
 
-                    public int size() {
-                        return segment.axes.length;
-                    }
-                });
-        aggMgr.cacheMgr.add(aggMgr, header, body);
+        // Write the segment into external cache.
+        //
+        // It would be a mistake to do this from the cacheMgr -- because the
+        // calls may take time. The cacheMgr's actions must all be quick. We
+        // are a worker, so we have plenty of time.
+        //
+        // Also note that we push the segments to external cache after we have
+        // called cacheMgr.loadSucceeded. That call will allow the current
+        // query to proceed.
+        cacheMgr.compositeCache.put(header, body);
     }
 
     private boolean setFailOnStillLoadingSegments(
-        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap,
+        Map<Segment, SegmentWithData> segmentMap,
         GroupingSetsList groupingSetsList,
         Throwable throwable)
     {
         int n = 0;
-        for (GroupingSet groupingset : groupingSetsList.getGroupingSets()) {
-            for (Segment segment : groupingset.getSegments()) {
-                final SlotFuture<SegmentWithData> slot =
-                    segmentSlotMap.get(segment);
-                if (!slot.isDone()) {
-                    slot.fail(throwable);
+        for (GroupingSet groupingSet : groupingSetsList.getGroupingSets()) {
+            for (Segment segment : groupingSet.getSegments()) {
+                if (!segmentMap.containsKey(segment)) {
+                    if (throwable == null) {
+                        throwable =
+                            new RuntimeException("Segment failed to load");
+                    }
+                    final SegmentHeader header = segment.getHeader();
+                    cacheMgr.loadFailed(header, throwable);
                     ++n;
                 }
             }
@@ -401,8 +399,7 @@ public class SegmentLoader {
     private void setDataToSegments(
         GroupingSetsList groupingSetsList,
         Map<BitKey, GroupingSetsList.Cohort> datasetsMap,
-        List<StarPredicate> compoundPredicateList,
-        Map<Segment, SlotFuture<SegmentWithData>> segmentSlotMap)
+        Map<Segment, SegmentWithData> segmentSlotMap)
     {
         List<GroupingSet> groupingSets = groupingSetsList.getGroupingSets();
         for (int i = 0; i < groupingSets.size(); i++) {
@@ -420,14 +417,29 @@ public class SegmentLoader {
                         segmentDataset,
                         cohort.axes);
 
-                // Send a message to the client statement, telling it that its
-                // segment is ready.
-                segmentSlotMap.get(segment).put(
-                    segmentWithData);
+                segmentSlotMap.put(segment, segmentWithData);
+
+                final SegmentHeader header = segmentWithData.getHeader();
+                final SegmentBody body =
+                    segmentWithData.getData().createSegmentBody(
+                        new AbstractList<
+                                Pair<SortedSet<Comparable<?>>, Boolean>>()
+                        {
+                            public Pair<SortedSet<Comparable<?>>, Boolean> get(
+                                int index)
+                            {
+                                return segmentWithData.axes[index]
+                                    .getValuesAndIndicator();
+                            }
+
+                            public int size() {
+                                return segmentWithData.axes.length;
+                            }
+                        });
 
                 // Send a message to the agg manager. It will place the segment
                 // in the index.
-                cacheSegment(segmentWithData);
+                cacheSegment(header, body);
             }
         }
     }
@@ -532,7 +544,7 @@ public class SegmentLoader {
     {
         RolapStar star = groupingSetsList.getStar();
         Pair<String, List<SqlStatement.Type>> pair =
-            aggMgr.generateSql(
+            AggregationManager.generateSql(
                 groupingSetsList, compoundPredicateList);
         return RolapUtil.executeQuery(
             star.getDataSource(),

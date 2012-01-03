@@ -4,21 +4,21 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // You must accept the terms of that agreement to use this software.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 */
 package mondrian.rolap.cache;
 
-import mondrian.olap.Util;
 import mondrian.rolap.BitKey;
 import mondrian.rolap.RolapUtil;
-import mondrian.spi.SegmentColumn;
-import mondrian.spi.SegmentHeader;
+import mondrian.rolap.agg.*;
+import mondrian.spi.*;
 import mondrian.util.*;
 
 import java.io.PrintWriter;
 import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.Future;
 
 /**
  * Data structure that identifies which segments contain cells.
@@ -46,8 +46,11 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     // TODO Get rid of the fuzzy map once we have a way to parse
     // compound predicates into rich objects that can be serialized
     // as part of the SegmentHeader.
-    private final Map<List, FactInfo> fuzzyFactMap =
-        new HashMap<List, FactInfo>();
+    private final Map<List, FuzzyFactInfo> fuzzyFactMap =
+        new HashMap<List, FuzzyFactInfo>();
+
+    private final Map<SegmentHeader, SlotFuture<SegmentBody>> headerMap =
+        new HashMap<SegmentHeader, SlotFuture<SegmentBody>>();
 
     private final Thread thread;
 
@@ -61,6 +64,29 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         assert thread != null;
     }
 
+    public static List makeConverterKey(SegmentHeader header) {
+        return Arrays.asList(
+            header.schemaName,
+            header.schemaChecksum,
+            header.cubeName,
+            header.rolapStarFactTableName,
+            header.measureName,
+            header.compoundPredicates);
+    }
+
+    public static List makeConverterKey(CellRequest request, AggregationKey key)
+    {
+        return Arrays.asList(
+            request.getMeasure().getStar().getSchema().getName(),
+            request.getMeasure().getStar().getSchema().getChecksum(),
+            request.getMeasure().getCubeName(),
+            request.getMeasure().getStar().getFactTable().getAlias(),
+            request.getMeasure().getName(),
+            AggregationKey.getCompoundPredicateStringList(
+                key.getStar(),
+                key.getCompoundPredicateList()));
+    }
+
     public List<SegmentHeader> locate(
         String schemaName,
         ByteString schemaChecksum,
@@ -68,11 +94,11 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String measureName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        Map<String, Comparable<?>> coords,
-        String[] compoundPredicates)
+        Map<String, Comparable<?>> coordinates,
+        List<String> compoundPredicates)
     {
-        assert thread == Thread.currentThread()
-            : "expected " + thread + ", but was " + Thread.currentThread();
+        checkThread();
+
         List<SegmentHeader> list = Collections.emptyList();
         final List starKey =
             makeBitkeyKey(
@@ -88,7 +114,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             return Collections.emptyList();
         }
         for (SegmentHeader header : headerList) {
-            if (matches(header, coords, compoundPredicates)) {
+            if (matches(header, coordinates, compoundPredicates)) {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
                 if (list.isEmpty()) {
@@ -100,9 +126,13 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         return list;
     }
 
-    public void add(SegmentHeader header) {
-        assert thread == Thread.currentThread()
-            : "expected " + thread + ", but was " + Thread.currentThread();
+    public void add(
+        SegmentHeader header,
+        SlotFuture<SegmentBody> bodyFuture,
+        SegmentBuilder.SegmentConverter converter)
+    {
+        checkThread();
+
         final List bitkeyKey = makeBitkeyKey(header);
         List<SegmentHeader> headerList = bitkeyMap.get(bitkeyKey);
         if (headerList == null) {
@@ -119,18 +149,45 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         }
         factInfo.headerList.add(header);
         factInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
+        if (converter != null) {
+            factInfo.converter = converter;
+        }
 
         final List fuzzyFactKey = makeFuzzyFactKey(header);
-        FactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
+        FuzzyFactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
         if (fuzzyFactInfo == null) {
-            fuzzyFactInfo = new FactInfo();
+            fuzzyFactInfo = new FuzzyFactInfo();
             fuzzyFactMap.put(fuzzyFactKey, fuzzyFactInfo);
         }
         fuzzyFactInfo.headerList.add(header);
-        fuzzyFactInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
+
+        if (bodyFuture != null) {
+            final SlotFuture<SegmentBody> previous =
+                headerMap.put(header, bodyFuture);
+            assert previous == null;
+        }
+    }
+
+    public void loadSucceeded(SegmentHeader header, SegmentBody body) {
+        checkThread();
+
+        final SlotFuture<SegmentBody> bodyFuture = headerMap.remove(header);
+        assert bodyFuture != null;
+        bodyFuture.put(body);
+    }
+
+    public void loadFailed(SegmentHeader header, Throwable throwable) {
+        checkThread();
+
+        final SlotFuture<SegmentBody> bodyFuture = headerMap.remove(header);
+        assert bodyFuture != null;
+        bodyFuture.fail(throwable);
+        remove(header);
     }
 
     public void remove(SegmentHeader header) {
+        checkThread();
+
         final List factKey = makeFactKey(header);
         final FactInfo factInfo = factMap.get(factKey);
         factInfo.headerList.remove(header);
@@ -139,7 +196,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         }
 
         final List fuzzyFactKey = makeFuzzyFactKey(header);
-        final FactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
+        final FuzzyFactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
         fuzzyFactInfo.headerList.remove(header);
         if (fuzzyFactInfo.headerList.size() == 0) {
             fuzzyFactMap.remove(fuzzyFactKey);
@@ -152,14 +209,21 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             bitkeyMap.remove(bitkeyKey);
             factInfo.bitkeyPoset.remove(header.getConstrainedColumnsBitKey());
         }
+
+        headerMap.remove(header);
     }
 
-    private boolean matches(
+    private void checkThread() {
+        assert thread == Thread.currentThread()
+            : "expected " + thread + ", but was " + Thread.currentThread();
+    }
+
+    public static boolean matches(
         SegmentHeader header,
         Map<String, Comparable<?>> coords,
-        String[] compoundPredicates)
+        List<String> compoundPredicates)
     {
-        if (!Arrays.equals(header.compoundPredicates, compoundPredicates)) {
+        if (!header.compoundPredicates.equals(compoundPredicates)) {
             return false;
         }
         for (Map.Entry<String, Comparable<?>> entry : coords.entrySet()) {
@@ -178,10 +242,11 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             final SegmentColumn constrainedColumn =
                 header.getConstrainedColumn(entry.getKey());
             if (constrainedColumn == null) {
-                throw Util.newInternal(
-                    "Segment axis for column '"
-                    + entry.getKey()
-                    + "' not found");
+                // One of the required column/value pairs is not a constraining
+                // column for the header. This will not happen if the header
+                // has been acquired from bitkeyMap, but may happen if a list
+                // of mixed-dimensionality headers is being scanned.
+                return false;
             }
             final SortedSet<Comparable<?>> values =
                 constrainedColumn.getValues();
@@ -202,15 +267,15 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String rolapStarFactTableName,
         SegmentColumn[] region)
     {
-        assert thread == Thread.currentThread()
-            : "expected " + thread + ", but was " + Thread.currentThread();
+        checkThread();
+
         final List factKey = makeFuzzyFactKey(
             schemaName,
             schemaChecksum,
             cubeName,
             rolapStarFactTableName,
             measureName);
-        final FactInfo factInfo = fuzzyFactMap.get(factKey);
+        final FuzzyFactInfo factInfo = fuzzyFactMap.get(factKey);
         List<SegmentHeader> list = Collections.emptyList();
         if (factInfo == null) {
             return list;
@@ -263,11 +328,66 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     }
 
     public void printCacheState(PrintWriter pw) {
+        checkThread();
+
         for (List<SegmentHeader> headerList : bitkeyMap.values()) {
             for (SegmentHeader header : headerList) {
                 pw.println(header.getDescription());
             }
         }
+    }
+
+    public Future<SegmentBody> getFuture(SegmentHeader header) {
+        checkThread();
+
+        return headerMap.get(header);
+    }
+
+    public SegmentBuilder.SegmentConverter getConverter(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String rolapStarFactTableName,
+        String measureName,
+        List<String> compoundPredicates)
+    {
+        checkThread();
+
+        final List factKey = makeFactKey(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName,
+            compoundPredicates);
+        final FactInfo factInfo = factMap.get(factKey);
+        if (factInfo == null) {
+            return null;
+        }
+        return factInfo.converter;
+    }
+
+    public void setConverter(
+        String schemaName,
+        ByteString schemaChecksum,
+        String cubeName,
+        String rolapStarFactTableName,
+        String measureName,
+        List<String> compoundPredicates,
+        SegmentBuilder.SegmentConverter converter)
+    {
+        checkThread();
+
+        final List factKey = makeFactKey(
+            schemaName,
+            schemaChecksum,
+            cubeName,
+            rolapStarFactTableName,
+            measureName,
+            compoundPredicates);
+        final FactInfo factInfo = factMap.get(factKey);
+        assert factInfo != null : "should have called 'add' first";
+        factInfo.converter = converter;
     }
 
     private List makeBitkeyKey(SegmentHeader header) {
@@ -288,7 +408,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
         String measureName,
-        String[] compoundPredicates)
+        List<String> compoundPredicates)
     {
         return Arrays.asList(
             schemaName,
@@ -297,7 +417,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             rolapStarFactTableName,
             constrainedColsBitKey,
             measureName,
-            Arrays.deepToString(compoundPredicates));
+            compoundPredicates);
     }
 
     private List makeFactKey(SegmentHeader header) {
@@ -316,7 +436,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String cubeName,
         String rolapStarFactTableName,
         String measureName,
-        String[] compoundPredicates)
+        List<String> compoundPredicates)
     {
         return Arrays.asList(
             schemaName,
@@ -324,7 +444,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             cubeName,
             rolapStarFactTableName,
             measureName,
-            Arrays.deepToString(compoundPredicates));
+            compoundPredicates);
     }
 
     private List makeFuzzyFactKey(SegmentHeader header) {
@@ -358,8 +478,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         String measureName,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        Map<String, Comparable<?>> coords,
-        String[] compoundPredicates)
+        Map<String, Comparable<?>> coordinates,
+        List<String> compoundPredicates)
     {
         final List factKey = makeFactKey(
             schemaName,
@@ -401,7 +521,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             // Of the columns that are being aggregated away, are all of
             // them wildcarded? If so, this segment is a match. If not, we
             // will need to combine with other segments later.
-            findRollupCandidatesAmong(coords, list, headers);
+            findRollupCandidatesAmong(coordinates, list, headers);
         }
         return list;
     }
@@ -409,32 +529,35 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     /**
      * Finds rollup candidates among a list of headers with the same
      * dimensionality.
-     * 
+     *
      * <p>For each column that is being aggregated away, we need to ensure that
      * we have all values of that column. If the column is wildcarded, it's
      * easy. For example, if we wish to roll up to create Segment1:</p>
-     * 
+     *
      * <pre>Segment1(Year=1997, MaritalStatus=*)</pre>
-     * 
+     *
      * <p>then clearly Segment2:</p>
      *
      * <pre>Segment2(Year=1997, MaritalStatus=*, Gender=*, Nation=*)</pre>
-     * 
+     *
      * <p>has all gender and Nation values. If the values are specified as a
      * list:</p>
-     * 
+     *
      * <pre>Segment3(Year=1997, MaritalStatus=*, Gender={M, F}, Nation=*)</pre>
-     * 
+     *
      * <p>then we need to check the metadata. We see that Gender has two
      * distinct values in the database, and we have two values, therefore we
      * have all of them.</p>
-     * 
+     *
      * <p>What if we have multiple non-wildcard columns? Consider:</p>
      *
      * <pre>
-     *     Segment4(Year=1997, MaritalStatus=*, Gender={M}, Nation={Mexico, USA})
-     *     Segment5(Year=1997, MaritalStatus=*, Gender={F}, Nation={USA})
-     *     Segment6(Year=1997, MaritalStatus=*, Gender={F, M}, Nation={Canada, Mexico, Honduras, Belize})
+     *     Segment4(Year=1997, MaritalStatus=*, Gender={M},
+                    Nation={Mexico, USA})
+     *     Segment5(Year=1997, MaritalStatus=*, Gender={F},
+                    Nation={USA})
+     *     Segment6(Year=1997, MaritalStatus=*, Gender={F, M},
+                    Nation={Canada, Mexico, Honduras, Belize})
      * </pre>
      *
      * <p>The problem is similar to finding whether a collection of rectangular
@@ -462,6 +585,13 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             new ArrayList<Pair<SegmentHeader, List<SegmentColumn>>>();
         headerLoop:
         for (SegmentHeader header : headers) {
+            // Skip headers that have exclusions.
+            //
+            // TODO: This is a bit harsh.
+            if (!header.getExcludedRegions().isEmpty()) {
+                continue;
+            }
+
             List<SegmentColumn> nonWildcards =
                 new ArrayList<SegmentColumn>();
             for (SegmentColumn column : header.getConstrainedColumns()) {
@@ -540,7 +670,8 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                         column.columnExpression);
                 if (column1.getValues() == null) {
                     // Wildcard. Mark all values as present.
-                    for (Entry<Comparable, BitSet> entry : valueMap.entrySet()) {
+                    for (Entry<Comparable, BitSet> entry : valueMap.entrySet())
+                    {
                         for (int pos = 0;
                             pos < entry.getValue().cardinality();
                             pos++)
@@ -667,7 +798,17 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         private final PartiallyOrderedSet<BitKey> bitkeyPoset =
             new PartiallyOrderedSet<BitKey>(ORDERING);
 
+        private SegmentBuilder.SegmentConverter converter;
+
         FactInfo() {
+        }
+    }
+
+    private static class FuzzyFactInfo {
+        private final List<SegmentHeader> headerList =
+            new ArrayList<SegmentHeader>();
+
+        FuzzyFactInfo() {
         }
     }
 }

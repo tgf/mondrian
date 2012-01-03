@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2011 Julian Hyde and others
+// Copyright (C) 2001-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -12,15 +12,14 @@
 */
 package mondrian.rolap.agg;
 
+import mondrian.calc.impl.ListTupleList;
 import mondrian.olap.CacheControl;
 import mondrian.olap.MondrianProperties;
 import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.SqlStatement.Type;
 import mondrian.rolap.aggmatcher.AggStar;
-import mondrian.rolap.cache.*;
 import mondrian.server.Locus;
-import mondrian.spi.SegmentCache;
 import mondrian.util.Pair;
 
 import org.apache.log4j.Logger;
@@ -45,18 +44,9 @@ public class AggregationManager extends RolapAggregationManager {
     private static final Logger LOGGER =
         Logger.getLogger(AggregationManager.class);
 
-    public final List<SegmentCacheWorker> segmentCacheWorkers =
-        new CopyOnWriteArrayList<SegmentCacheWorker>();
-
     public final SegmentCacheManager cacheMgr = new SegmentCacheManager();
 
     private static AggregationManager instance;
-
-    // TODO: create using factory and/or configuration parameters. Executor
-    //   should be shared within MondrianServer or target JDBC database.
-    public final ExecutorService sqlExecutor =
-        Util.getExecutorService(
-            10, 0, 1, 10, "mondrian.rolap.agg.AggregationManager$sqlExecutor");
 
     /**
      * Returns or creates the singleton.
@@ -83,21 +73,6 @@ public class AggregationManager extends RolapAggregationManager {
                 "Property " + properties.EnableCacheHitCounters.getPath()
                 + " is obsolete; ignored.");
         }
-        // Add a local cache, if needed.
-        if (!MondrianProperties.instance().DisableCaching.get()) {
-            final MemorySegmentCache cache = new MemorySegmentCache();
-            segmentCacheWorkers.add(
-                new SegmentCacheWorker(cache));
-        }
-        // Add an external cache, if configured.
-        final SegmentCache externalCache = SegmentCacheWorker.initCache();
-        if (externalCache != null) {
-            // Create a worker for this external cache
-            segmentCacheWorkers.add(new SegmentCacheWorker(externalCache));
-            // Hook up a listener so it can update
-            // the segment index.
-            externalCache.addListener(new AsyncCacheListener(this));
-        }
     }
 
     /**
@@ -110,36 +85,39 @@ public class AggregationManager extends RolapAggregationManager {
     }
 
     /**
-     * Called by FastBatchingCellReader.loadAggregation where the
+     * Called by FastBatchingCellReader.load where the
      * RolapStar creates an Aggregation if needed.
      *
+     * @param cacheMgr Cache manager
      * @param cellRequestCount Number of missed cells that led to this request
      * @param measures Measures to load
      * @param columns this is the CellRequest's constrained columns
      * @param aggregationKey this is the CellRequest's constraint key
      * @param predicates Array of constraints on each column
-     * @param pinnedSegments Set of pinned segments
      * @param groupingSetsCollector grouping sets collector
+     * @param segmentFutures List of futures into which each statement will
+     *     place a list of the segments it has loaded, when it completes
      */
-    public List<Future<SegmentWithData>> loadAggregation(
+    public static void loadAggregation(
+        SegmentCacheManager cacheMgr,
         int cellRequestCount,
-        RolapStar.Measure[] measures,
+        List<RolapStar.Measure> measures,
         RolapStar.Column[] columns,
         AggregationKey aggregationKey,
         StarColumnPredicate[] predicates,
-        PinSet pinnedSegments,
-        GroupingSetsCollector groupingSetsCollector)
+        GroupingSetsCollector groupingSetsCollector,
+        List<Future<Map<Segment, SegmentWithData>>> segmentFutures)
     {
-        RolapStar star = measures[0].getStar();
+        RolapStar star = measures.get(0).getStar();
         Aggregation aggregation =
             star.lookupOrCreateAggregation(aggregationKey);
 
-        // try to eliminate unneccessary constraints
+        // try to eliminate unnecessary constraints
         // for Oracle: prevent an IN-clause with more than 1000 elements
         predicates = aggregation.optimizePredicates(columns, predicates);
-        return aggregation.load(
-            cellRequestCount, columns, measures, predicates, pinnedSegments,
-            groupingSetsCollector);
+        aggregation.load(
+            cacheMgr, cellRequestCount, columns, measures, predicates,
+            groupingSetsCollector, segmentFutures);
     }
 
     /**
@@ -155,7 +133,21 @@ public class AggregationManager extends RolapAggregationManager {
     {
         return new CacheControlImpl(connection) {
             protected void flushNonUnion(final CellRegion region) {
-              cacheMgr.flush(AggregationManager.this, this, region);
+                final SegmentCacheManager.FlushResult result =
+                    cacheMgr.execute(
+                        new SegmentCacheManager.FlushCommand(
+                            Locus.peek(),
+                            cacheMgr,
+                            region,
+                            this));
+                final List<Future<Boolean>> futures =
+                    new ArrayList<Future<Boolean>>();
+                for (Callable<Boolean> task : result.tasks) {
+                    futures.add(cacheMgr.cacheExecutor.submit(task));
+                }
+                for (Future<Boolean> future : futures) {
+                    Util.discard(Util.safeGet(future, "Flush cache"));
+                }
             }
 
             public void flush(final CellRegion region) {
@@ -185,7 +177,7 @@ public class AggregationManager extends RolapAggregationManager {
     }
 
     public Object getCellFromCache(CellRequest request, PinSet pinSet) {
-        // NOTE: This method used to check both local (thread/statment) cache
+        // NOTE: This method used to check both local (thread/statement) cache
         // and global cache (segments in JVM, shared between statements). Now it
         // only looks in local cache. This can be done without acquiring any
         // locks, because the local cache is thread-local. If a segment that
@@ -202,13 +194,13 @@ public class AggregationManager extends RolapAggregationManager {
 
     public String getDrillThroughSql(
         final CellRequest request,
-        final StarPredicate starPrediateSlicer,
+        final StarPredicate starPredicateSlicer,
         final boolean countOnly)
     {
         DrillThroughQuerySpec spec =
             new DrillThroughQuerySpec(
                 request,
-                starPrediateSlicer,
+                starPredicateSlicer,
                 countOnly);
         Pair<String, List<SqlStatement.Type>> pair = spec.generateSqlQuery();
 
@@ -229,7 +221,7 @@ public class AggregationManager extends RolapAggregationManager {
      * @return A pair consisting of a SQL statement and a list of suggested
      *     types of columns
      */
-    public Pair<String, List<SqlStatement.Type>> generateSql(
+    public static Pair<String, List<SqlStatement.Type>> generateSql(
         GroupingSetsList groupingSetsList,
         List<StarPredicate> compoundPredicateList)
     {
@@ -252,7 +244,7 @@ public class AggregationManager extends RolapAggregationManager {
             if (aggStar != null) {
                 // Got a match, hot damn
 
-                if (getLogger().isDebugEnabled()) {
+                if (LOGGER.isDebugEnabled()) {
                     StringBuilder buf = new StringBuilder(256);
                     buf.append("MATCH: ");
                     buf.append(star.getFactTable().getAlias());
@@ -276,7 +268,7 @@ public class AggregationManager extends RolapAggregationManager {
                         buf.append(column);
                         buf.append(Util.nl);
                     }
-                    getLogger().debug(buf.toString());
+                    LOGGER.debug(buf.toString());
                 }
 
                 AggQuerySpec aggQuerySpec =
@@ -284,8 +276,8 @@ public class AggregationManager extends RolapAggregationManager {
                         aggStar, rollup[0], groupingSetsList);
                 Pair<String, List<Type>> sql = aggQuerySpec.generateSqlQuery();
 
-                if (getLogger().isDebugEnabled()) {
-                    getLogger().debug(
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug(
                         "generateSqlQuery: sql="
                         + sql.left);
                 }
@@ -296,7 +288,7 @@ public class AggregationManager extends RolapAggregationManager {
             // No match, fall through and use fact table.
         }
 
-        if (getLogger().isDebugEnabled()) {
+        if (LOGGER.isDebugEnabled()) {
             StringBuilder sb = new StringBuilder();
             sb.append("NO MATCH : ");
             sb.append(star.getFactTable().getAlias());
@@ -314,7 +306,7 @@ public class AggregationManager extends RolapAggregationManager {
             }
             sb.append(Util.nl);
             sb.append("]");
-            getLogger().debug(sb.toString());
+            LOGGER.debug(sb.toString());
         }
 
 
@@ -324,8 +316,8 @@ public class AggregationManager extends RolapAggregationManager {
 
         Pair<String, List<SqlStatement.Type>> pair = spec.generateSqlQuery();
 
-        if (getLogger().isDebugEnabled()) {
-            getLogger().debug(
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug(
                 "generateSqlQuery: sql=" + pair.left);
         }
 
@@ -348,7 +340,7 @@ public class AggregationManager extends RolapAggregationManager {
      *   an exact match
      * @return An aggregate, or null if none is suitable.
      */
-    public AggStar findAgg(
+    public static AggStar findAgg(
         RolapStar star,
         final BitKey levelBitKey,
         final BitKey measureBitKey,
@@ -494,10 +486,9 @@ System.out.println(buf.toString());
         // Send a shutdown command and wait for it to return.
         cacheMgr.shutdown();
         // Now we can cleanup.
-        for (SegmentCacheWorker worker : segmentCacheWorkers) {
+        for (SegmentCacheWorker worker : cacheMgr.segmentCacheWorkers) {
             worker.shutdown();
         }
-        sqlExecutor.shutdown();
     }
 
     /**
@@ -508,63 +499,6 @@ System.out.println(buf.toString());
         extends HashSet<Segment>
         implements RolapAggregationManager.PinSet
     {
-    }
-
-    /**
-     * This is an implementation of SegmentCacheListener which updates the
-     * segment index of its aggregation manager instance when it receives
-     * events from its assigned SegmentCache implementation.
-     */
-    private static class AsyncCacheListener
-        implements SegmentCache.SegmentCacheListener
-    {
-        private final AggregationManager aggMan;
-        public AsyncCacheListener(AggregationManager aggMan) {
-            this.aggMan = aggMan;
-        }
-        public void handle(final SegmentCacheEvent e) {
-            final SegmentCacheManager.Command<Void> command;
-            final Locus locus = Locus.peek();
-            switch (e.getEventType()) {
-            case ENTRY_CREATED:
-                command =
-                    new SegmentCacheManager.Command<Void>() {
-                        public Void call() throws Exception {
-                            Locus.push(locus);
-                            try {
-                                aggMan.cacheMgr
-                                    .externalSegmentCreated(
-                                        aggMan,
-                                        e.getSource());
-                                return null;
-                            } finally {
-                                Locus.pop(locus);
-                            }
-                        }
-                    };
-                break;
-            case ENTRY_DELETED:
-                command =
-                    new SegmentCacheManager.Command<Void>() {
-                        public Void call() throws Exception {
-                            Locus.push(locus);
-                            try {
-                                aggMan.cacheMgr
-                                    .externalSegmentDeleted(
-                                        aggMan,
-                                        e.getSource());
-                                return null;
-                            } finally {
-                                Locus.pop(locus);
-                            }
-                        }
-                    };
-                break;
-            default:
-                throw new UnsupportedOperationException();
-            }
-            aggMan.cacheMgr.execute(command);
-        }
     }
 }
 

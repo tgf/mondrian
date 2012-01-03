@@ -4,19 +4,21 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // You must accept the terms of that agreement to use this software.
-// Copyright (C) 2011-2011 Julian Hyde
+// Copyright (C) 2011-2012 Julian Hyde
 // All Rights Reserved.
 */
 package mondrian.rolap.agg;
 
-import mondrian.olap.CacheControl;
+import mondrian.olap.*;
 import mondrian.olap.CacheControl.CellRegion;
-import mondrian.olap.Member;
-import mondrian.olap.Util;
 import mondrian.rolap.*;
 import mondrian.rolap.cache.*;
+import mondrian.server.Locus;
+import mondrian.server.monitor.*;
 import mondrian.spi.*;
 import mondrian.util.Pair;
+
+import org.apache.log4j.Logger;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -59,7 +61,7 @@ import java.util.concurrent.*;
  *
  *
  *
- * <h2>Checked in</h3>
+ * <h2>Done</h2>
  *
  * <p>1. Obsolete CountingAggregationManager, and property
  * mondrian.rolap.agg.enableCacheHitCounters.</p>
@@ -72,9 +74,18 @@ import java.util.concurrent.*;
  * client). AggregationManager (or maybe MondrianServer) is another constructor
  * parameter.</p>
  *
+ * <p>5. Move SegmentHeader, SegmentBody, ConstrainedColumn into
+ * mondrian.spi. Leave behind dependencies on mondrian.rolap.agg. In particular,
+ * put code that converts Segment + SegmentWithData to and from SegmentHeader
+ * + SegmentBody (e.g. {@link SegmentHeader}#forSegment) into a utility class.
+ * (Do this as CLEANUP, after functionality is complete?)</p>
+ *
  * <p>6. Move functionality Aggregation to Segment. Long-term, Aggregation
  * should not be used as a 'gatekeeper' to Segment. Remove Aggregation fields
  * columns and axes.</p>
+ *
+ * <p>9. Obsolete {@link RolapStar#cacheAggregations}. Similar effect will be
+ * achieved by removing the 'jvm cache' from the chain of caches.</p>
  *
  * <p>10. Rename Aggregation.Axis to SegmentAxis.</p>
  *
@@ -109,69 +120,27 @@ import java.util.concurrent.*;
  * <p>13. Fix flush. Obsolete {@link Aggregation}.flush, and
  * {@link RolapStar}.flush, which called it.</p>
  *
- *
- * <h2>Done but not checked in</h2>
- *
- *
+ * <p>18. {@code SegmentCacheManager#locateHeaderBody} (and maybe other
+ * methods) call {@link SegmentCacheWorker#get}, and that's a slow blocking
+ * call. Make waits for segment futures should be called from a worker or
+ * client, not an agent.</p>
  *
  *
  * <h2>Ideas and tasks</h2>
  *
- * <p>1. Add method {@code SegmentCache.addListener(Listener)}, with
- *
- * <pre>
- * interface Listener {
- *   void segmentAdded(SegmentHeader);
- * }</pre></p>
- *
- * <p>5. Move SegmentHeader, SegmentBody, ConstrainedColumn into
- * mondrian.spi. Leave behind dependencies on mondrian.rolap.agg. In particular,
- * put code that converts Segment + SegmentWithData to and from SegmentHeader
- * + SegmentBody (e.g. {@link SegmentHeader}#forSegment) into a utility class.
- * (Do this as CLEANUP, after functionality is complete?)</p>
- *
  * <p>7. RolapStar.localAggregations and .sharedAggregations. Obsolete
  * sharedAggregations.</p>
  *
- * <p>CRUD analysis:
- * <ul>
- *
- * <li>delete: RolapStar.clearCachedAggregations;
- *     calls sharedAggregations.clear</li>
- *
- * <li>read: RolapStar.lookupAggregation(AggregationKey)
- *     calls sharedAggregations.get</li>
- *
- * <li>read into local: RolapStar.checkAggregateModifications;
- *     calls localAggregations.put on each value in sharedAggregations</li>
- *
- * <li>delete: RolapStar.flush;
- *     calls aggregation.flush for each value in sharedAggregations</li>
- *
- * <li>create: RolapStar.pushAggregateModificationsToGlobalCache;
- *     called at end of constructing RolapResult</li>
- *
- * <li>create: SegmentLoader.load;
- *     calls SegmentLoader.loadSegmentsFromCache
- *     then generates SQL if not found</li>
- *
- * </ul>
- *
- * <p>8. Longer term. Maybe move {@link RolapStar.Bar#segmentRefs} to
+ * <p>8. Longer term. Move {@link mondrian.rolap.RolapStar.Bar}.segmentRefs to
  * {@link mondrian.server.Execution}. Would it still be thread-local?</p>
- *
- * <p>9. Obsolete {@link RolapStar#cacheAggregations}. Similar effect will be
- * achieved by removing the 'jvm cache' from the chain of caches.</p>
  *
  * <p>10. Call
  * {@link mondrian.spi.DataSourceChangeListener#isAggregationChanged}.
  * Previously called from
  * {@link RolapStar}.checkAggregateModifications, now never called.</p>
  *
- * <p>12. Remove SegmentHeader.forCacheRegion (1 use), replace with
- * List&lt;SegmentHeader&gt;
- * SegmentCacheIndex.findHeadersOverlapping(RolapCacheRegion).
- * Then what? Various options:</p>
+ * <p>12. We can quickly identify segments affected by a flush using
+ * {@link SegmentCacheIndex#intersectRegion}. But then what? Options:</p>
  *
  * <ol>
  *
@@ -195,7 +164,9 @@ import java.util.concurrent.*;
  * <p>15. Method to convert SegmentHeader + SegmentBody to Segment +
  * SegmentWithData is imperfect. Cannot parse predicates, compound predicates.
  * Need mapping in star to do it properly and efficiently?
- * See {@link SegmentBuilder#toSegment}.</p>
+ * {@link mondrian.rolap.agg.SegmentBuilder.SegmentConverter} is a hack that
+ * can be removed when this is fixed.
+ * See {@link SegmentBuilder#toSegment}. Also see #20.</p>
  *
  * <p>17. Revisit the strategy for finding segments that can be copied from
  * global and external cache into local cache. The strategy of sending N
@@ -207,37 +178,23 @@ import java.util.concurrent.*;
  * return those segments, but not execute SQL until the end of the phase.
  * If so, {@link CellRequestQuantumExceededException} be obsoleted.</p>
  *
- * <p>18. {@link FastBatchingCellReader#locateHeaderBody} (and maybe other
- * methods) call {@link SegmentCacheWorker#get}, and that's a slow blocking
- * call. Make waits for segment futures should be called from a worker or
- * client, not an agent.</p>
- *
  * <p>19. Tracing.
- * a. Remove or repurpose {@link FastBatchingCellReader#pendingCount};
+ * a. Remove or re-purpose {@link FastBatchingCellReader#pendingCount};
  * b. Add counter to measure requests satisfied by calling
- * {@link FastBatchingCellReader#peek}.</p>
+ * {@link mondrian.rolap.agg.SegmentCacheManager#peek}.</p>
  *
+ * <p>20. Obsolete {@link SegmentDataset} and its implementing classes.
+ * {@link SegmentWithData} can use {@link SegmentBody} instead. Will save
+ * copying.</p>
  *
- * <h2>Segment lifecycle</h2>
+ * <p>21. Obsolete {@link mondrian.util.CombiningGenerator}.</p>
  *
- * <ul>
- * <li>sequence of missed cell requests &rarr; batch</li>
- * <li>send batch to CellCacheActor &rarr; future&lt;void&gt;</li>
- * </ul>
+ * <p>22. {@link SegmentHeader#constrain(mondrian.spi.SegmentColumn[])} is
+ * broken for N-dimensional regions where N &gt; 1. Each call currently
+ * creates N more 1-dimensional regions, but should create 1 more N-dimensional
+ * region. {@link SegmentHeader#excludedRegions} should be a list of
+ * {@link SegmentColumn} arrays.</p>
  *
- *
- * <h2>Questions for Luc</h2>
- *
- * <p>1. Is a SegmentCache supposed to be thread-safe?</p>
- * <p>no.</p>
- *
- * <p>2. SegmentCache.put - should it return {@code Future<Boolean>} or
- * {@code Future<Void>}?</p>
- * <p>whichever. doesn't really matter.</p>
- *
- * <p>3. SegmentCache.flush - too much burden on the cache provider?  Instead,
- * SegmentCacheIndex should identify segment headers that overlap with the
- * region.</p>
  *
  * @author jhyde
  * @version $Id$
@@ -246,7 +203,35 @@ public class SegmentCacheManager {
     private final Handler handler = new Handler();
     private final Actor ACTOR;
     public final SegmentCacheIndex segmentIndex;
-    private final Thread thread;
+    final Thread thread;
+
+    /**
+     * Executor with which to send requests to external caches.
+     */
+    public final ExecutorService cacheExecutor =
+        Util.getExecutorService(
+            10, 0, 1, 10,
+            "mondrian.rolap.agg.SegmentCacheManager$cacheExecutor");
+
+    /**
+     * Executor with which to execute SQL requests.
+     *
+     * <p>TODO: create using factory and/or configuration parameters. Executor
+     * should be shared within MondrianServer or target JDBC database.
+     */
+    public final ExecutorService sqlExecutor =
+        Util.getExecutorService(
+            10, 0, 1, 10, "mondrian.rolap.agg.SegmentCacheManager$sqlExecutor");
+
+    // NOTE: This list is only mutable for testing purposes. Would rather it
+    // were immutable.
+    public final List<SegmentCacheWorker> segmentCacheWorkers =
+        new CopyOnWriteArrayList<SegmentCacheWorker>();
+
+    public final SegmentCache compositeCache;
+
+    private static final Logger LOGGER =
+        Logger.getLogger(AggregationManager.class);
 
     public SegmentCacheManager() {
         ACTOR = new Actor();
@@ -255,6 +240,25 @@ public class SegmentCacheManager {
         thread.setDaemon(true);
         segmentIndex = new SegmentCacheIndexImpl(thread);
         thread.start();
+
+        // Add a local cache, if needed.
+        if (!MondrianProperties.instance().DisableCaching.get()) {
+            final MemorySegmentCache cache = new MemorySegmentCache();
+            segmentCacheWorkers.add(
+                new SegmentCacheWorker(cache, thread));
+        }
+        // Add an external cache, if configured.
+        final SegmentCache externalCache = SegmentCacheWorker.initCache();
+        if (externalCache != null) {
+            // Create a worker for this external cache
+            segmentCacheWorkers.add(
+                new SegmentCacheWorker(externalCache, thread));
+            // Hook up a listener so it can update
+            // the segment index.
+            externalCache.addListener(new AsyncCacheListener(this));
+        }
+
+        compositeCache = new CompositeSegmentCache(segmentCacheWorkers);
     }
 
     public <T> T execute(Command<T> command) {
@@ -262,103 +266,93 @@ public class SegmentCacheManager {
     }
 
     /**
-     * Tells the cache that a segment has completed loading from SQL, and
-     * provides the data set.
-     *
-     * <p>Called by a SQL worker.</p>
-     */
-    public void loadSucceeded(
-        Segment segment,
-        SegmentDataset dataset)
-    {
-        ACTOR.event(
-            handler,
-            new SegmentLoadSucceededEvent(null /*bar*/, segment, dataset));
-    }
-
-    /**
-     * Tells the cache that an attempt to load a segment has failed.
-     *
-     * <p>Called by a SQL worker.</p>
-     */
-    public void loadFailed(
-        Segment segment,
-        Throwable throwable)
-    {
-        ACTOR.event(
-            handler,
-            new SegmentLoadFailedEvent(segment, throwable));
-    }
-
-    /**
-     * Adds a segment to segment index and cache.
+     * Adds a segment to segment index.
      *
      * <p>Called when a SQL statement has finished loading a segment.</p>
      *
-     * @param aggMgr Aggregate manager
+     * <p>Does not add the segment to the external cache. That is a potentially
+     * long-duration operation, better carried out by a worker.</p>
+     *
      * @param header segment header
      * @param body segment body
      */
-    public void add(
-        AggregationManager aggMgr,
+    public void loadSucceeded(
         SegmentHeader header,
         SegmentBody body)
     {
         ACTOR.event(
             handler,
-            new SegmentAddEvent(aggMgr, header, body));
+            new SegmentLoadSucceededEvent(
+                System.currentTimeMillis(),
+                Locus.peek(),
+                this,
+                header,
+                body));
     }
 
     /**
-     * Removes a segment to segment index and cache.
+     * Informs cache manager that a segment load failed.
      *
-     * @param aggMgr Aggregate manager
+     * <p>Called when a SQL statement receives an error while loading a
+     * segment.</p>
+     *
+     * @param header segment header
+     * @param throwable Error
+     */
+    public void loadFailed(
+        SegmentHeader header,
+        Throwable throwable)
+    {
+        ACTOR.event(
+            handler,
+            new SegmentLoadFailedEvent(
+                System.currentTimeMillis(),
+                Locus.peek(),
+                this,
+                header,
+                throwable));
+    }
+
+    /**
+     * Removes a segment from segment index and cache.
+     *
+     * @param cacheMgr Cache manager
      * @param header segment header
      */
     public void remove(
-        AggregationManager aggMgr,
+        SegmentCacheManager cacheMgr,
         SegmentHeader header)
     {
         ACTOR.event(
             handler,
-            new SegmentRemoveEvent(aggMgr, header));
-    }
-
-    public void flush(
-        AggregationManager aggMan,
-        CacheControl cacheControl,
-        CacheControl.CellRegion region)
-    {
-        execute(
-            new FlushCommand(
-                aggMan,
-                region,
-                (CacheControlImpl) cacheControl));
+            new SegmentRemoveEvent(
+                System.currentTimeMillis(),
+                Locus.peek(),
+                cacheMgr,
+                header));
     }
 
     /**
      * Tells the cache that a segment is newly available in an external cache.
      */
-    public void externalSegmentCreated(
-        AggregationManager aggMgr,
-        SegmentHeader header)
-    {
+    public void externalSegmentCreated(SegmentHeader header) {
         ACTOR.event(
             handler,
-            new ExternalSegmentCreatedEvent(aggMgr, header));
+            new ExternalSegmentCreatedEvent(
+                System.currentTimeMillis(),
+                Locus.peek(),
+                this,
+                header));
     }
 
     /**
      * Tells the cache that a segment is no longer available in an external
      * cache.
      */
-    public void externalSegmentDeleted(
-        AggregationManager aggMgr,
-        SegmentHeader header)
-    {
+    public void externalSegmentDeleted(SegmentHeader header) {
         ACTOR.event(
             handler,
-            new ExternalSegmentDeletedEvent(aggMgr, header));
+            new ExternalSegmentDeletedEvent(this, header));
     }
 
     /**
@@ -366,6 +360,70 @@ public class SegmentCacheManager {
      */
     public void shutdown() {
         execute(new ShutdownCommand());
+        cacheExecutor.shutdown();
+        sqlExecutor.shutdown();
+    }
+
+    public SegmentBuilder.SegmentConverter getConverter(SegmentHeader header) {
+        return segmentIndex.getConverter(
+            header.schemaName,
+            header.schemaChecksum,
+            header.cubeName,
+            header.rolapStarFactTableName,
+            header.measureName,
+            header.compoundPredicates);
+    }
+
+    /**
+     * Makes a quick request to the aggregation manager to see whether the
+     * cell value required by a particular cell request is in external cache.
+     *
+     * <p>'Quick' is relative. It is an asynchronous request (due to
+     * the aggregation manager being an actor) and therefore somewhat slow. If
+     * the segment is in cache, will save batching up future requests and
+     * re-executing the query. Win should be particularly noticeable for queries
+     * running on a populated cache. Without this feature, every query would
+     * require at least two iterations.</p>
+     *
+     * <p>Request does not issue SQL to populate the segment. Nor does it
+     * try to find existing segments for rollup. Those operations can wait until
+     * next phase.</p>
+     *
+     * <p>Client is responsible for adding the segment to its private cache.</p>
+     *
+     * @param request Cell request
+     * @return Segment with data, or null if not in cache
+     */
+    public SegmentWithData peek(final CellRequest request) {
+        final SegmentCacheManager.PeekResponse response =
+            execute(
+                new PeekCommand(request, Locus.peek()));
+        for (SegmentHeader header : response.headerMap.keySet()) {
+            final SegmentBody body = compositeCache.get(header);
+            if (body != null) {
+                final SegmentBuilder.SegmentConverter converter =
+                    response.converterMap.get(
+                        SegmentCacheIndexImpl.makeConverterKey(header));
+                return converter.convert(header, body);
+            }
+        }
+        for (Map.Entry<SegmentHeader, Future<SegmentBody>> entry
+            : response.headerMap.entrySet())
+        {
+            final Future<SegmentBody> bodyFuture = entry.getValue();
+            if (bodyFuture != null) {
+                final SegmentBody body =
+                    Util.safeGet(
+                        bodyFuture,
+                        "Waiting for segment to load");
+                final SegmentHeader header = entry.getKey();
+                final SegmentBuilder.SegmentConverter converter =
+                    response.converterMap.get(
+                        SegmentCacheIndexImpl.makeConverterKey(header));
+                return converter.convert(header, body);
+            }
+        }
+        return null;
     }
 
     /**
@@ -374,7 +432,6 @@ public class SegmentCacheManager {
     public interface Visitor {
         void visit(SegmentLoadSucceededEvent event);
         void visit(SegmentLoadFailedEvent event);
-        void visit(SegmentAddEvent event);
         void visit(SegmentRemoveEvent event);
         void visit(ExternalSegmentCreatedEvent event);
         void visit(ExternalSegmentDeletedEvent event);
@@ -382,71 +439,72 @@ public class SegmentCacheManager {
 
     private static class Handler implements Visitor {
         public void visit(SegmentLoadSucceededEvent event) {
-            // 1. put dataset inside segment (create new segment?) and place it
-            // in index;
-            // 2. inform external cache
-            // 3. inform the thread that requested this segment
-            // 4. inform any other threads who requested it while it was in the
-            //    process of loading
-            /*
-            event.bar.segmentRefs.add(
-                new SoftReference<Segment>(event.segment)
-            );
-            List<FutureTask<Segment>> tasks =
-                segmentCompletionTasks.remove(event.segment);
-            if (tasks != null) {
-                for (FutureTask<Segment> task : tasks) {
-                    task.
-                }
-            }
-            */
-            throw new UnsupportedOperationException(); // TODO:
+            event.cacheMgr.segmentIndex.loadSucceeded(
+                event.header,
+                event.body);
+
+            event.locus.getServer().getMonitor().sendEvent(
+                new CellCacheSegmentCreateEvent(
+                    event.timestamp,
+                    event.locus,
+                    event.header.getConstrainedColumns().size(),
+                    event.body == null
+                        ? 0
+                        : event.body.getValueMap().size(),
+                    CellCacheSegmentCreateEvent.Source.SQL));
         }
 
         public void visit(SegmentLoadFailedEvent event) {
-            throw new UnsupportedOperationException(); // TODO:
+            event.cacheMgr.segmentIndex.loadFailed(
+                event.header,
+                event.throwable);
         }
 
-        public void visit(SegmentAddEvent event) {
-            event.aggMgr.cacheMgr.segmentIndex.add(event.header);
-            if (event.body == null) {
-                return;
-            }
-            for (SegmentCacheWorker segmentCacheWorker
-                : event.aggMgr.segmentCacheWorkers)
-            {
-                segmentCacheWorker.put(event.header, event.body);
-            }
-        }
+        public void visit(final SegmentRemoveEvent event) {
+            event.cacheMgr.segmentIndex.remove(event.header);
 
-        public void visit(SegmentRemoveEvent event) {
-            event.aggMgr.cacheMgr.segmentIndex.remove(event.header);
-            for (SegmentCacheWorker segmentCacheWorker
-                : event.aggMgr.segmentCacheWorkers)
-            {
-                if (segmentCacheWorker.contains(event.header)) {
-                    segmentCacheWorker.remove(event.header);
+            event.locus.getServer().getMonitor().sendEvent(
+                new CellCacheSegmentDeleteEvent(
+                    event.timestamp,
+                    event.locus,
+                    event.header.getConstrainedColumns().size()));
+
+            // Remove the segment from external caches. Use an executor, because
+            // it may take some time. We discard the future, because we don't
+            // care too much if it fails.
+            final Future<?> future = event.cacheMgr.cacheExecutor.submit(
+                new Runnable() {
+                    public void run() {
+                        try {
+                            // Note that the SegmentCache API doesn't require
+                            // us to verify that the segment exists (by calling
+                            // "contains") before we call "remove".
+                            event.cacheMgr.compositeCache.remove(event.header);
+                        } catch (Throwable e) {
+                            LOGGER.warn(
+                                "remove header failed: " + event.header,
+                                e);
+                        }
+                    }
                 }
-            }
+            );
+            Util.discard(future);
         }
 
         public void visit(ExternalSegmentCreatedEvent event) {
-            event.aggMgr.cacheMgr.segmentIndex.add(event.header);
+            event.cacheMgr.segmentIndex.add(event.header, null, null);
+
+            event.locus.getServer().getMonitor().sendEvent(
+                new CellCacheSegmentCreateEvent(
+                    event.timestamp,
+                    event.locus,
+                    event.header.getConstrainedColumns().size(),
+                    0,
+                    CellCacheSegmentCreateEvent.Source.EXTERNAL));
         }
 
         public void visit(ExternalSegmentDeletedEvent event) {
-            event.aggMgr.cacheMgr.segmentIndex.remove(event.header);
-        }
-    }
-
-    private static class SegmentLoadedTask extends FutureTask<Segment> {
-        public SegmentLoadedTask(Callable<Segment> segmentCallable) {
-            super(segmentCallable);
-        }
-
-        @Override
-        protected void done() {
-            super.done();
+            event.cacheMgr.segmentIndex.remove(event.header);
         }
     }
 
@@ -454,26 +512,37 @@ public class SegmentCacheManager {
     }
 
     public static interface Command<T> extends Message, Callable<T> {
+        Locus getLocus();
     }
 
-    private final class FlushCommand implements Command<Void> {
+    /**
+     * Command to flush a particular region from cache.
+     */
+    public static final class FlushCommand implements Command<FlushResult> {
         private final CellRegion region;
         private final CacheControlImpl cacheControlImpl;
-        private final AggregationManager aggMan;
+        private final Locus locus;
+        private final SegmentCacheManager cacheMgr;
+
         public FlushCommand(
-            AggregationManager aggMan,
+            Locus locus,
+            SegmentCacheManager cacheMgr,
             CellRegion region,
             CacheControlImpl cacheControlImpl)
         {
-            this.aggMan = aggMan;
+            this.locus = locus;
+            this.cacheMgr = cacheMgr;
             this.region = region;
             this.cacheControlImpl = cacheControlImpl;
         }
-        public Void call() throws Exception {
-            /*
-             * For each measure and each star, ask the index
-             * which headers intersect.
-             */
+
+        public Locus getLocus() {
+            return locus;
+        }
+
+        public FlushResult call() throws Exception {
+            // For each measure and each star, ask the index
+            // which headers intersect.
             final List<SegmentHeader> headers =
                 new ArrayList<SegmentHeader>();
             final List<Member> measures =
@@ -488,10 +557,10 @@ public class SegmentCacheManager {
                 RolapStoredMeasure storedMeasure =
                     (RolapStoredMeasure) member;
                 headers.addAll(
-                    segmentIndex.intersectRegion(
+                    cacheMgr.segmentIndex.intersectRegion(
                         member.getDimension().getSchema().getName(),
-                        ((RolapSchema)member.getDimension()
-                            .getSchema()).getChecksum(),
+                        ((RolapSchema) member.getDimension().getSchema())
+                            .getChecksum(),
                         storedMeasure.getCube().getName(),
                         storedMeasure.getName(),
                         storedMeasure.getCube().getStar()
@@ -499,61 +568,97 @@ public class SegmentCacheManager {
                         flushRegion));
             }
 
-            // If flushregion is empty, this means we must clear all
+            // If flushRegion is empty, this means we must clear all
             // segments for the region's measures.
             if (flushRegion.length == 0) {
                 for (SegmentHeader header : headers) {
-                    remove(aggMan, header);
+                    cacheMgr.remove(cacheMgr, header);
                 }
-                return null;
+                return new FlushResult(
+                    Collections.<Callable<Boolean>>emptyList());
             }
 
             // Now we know which headers intersect. For each of them,
             // we append an excluded region.
-            // TODO optimize the logic here. If a segment is mostly
-            // empty, we should thrash it completely.
-            for (SegmentHeader header : headers) {
+            //
+            // TODO: Optimize the logic here. If a segment is mostly
+            // empty, we should trash it completely.
+            final List<Callable<Boolean>> callableList =
+                new ArrayList<Callable<Boolean>>();
+            for (final SegmentHeader header : headers) {
                 if (!header.canConstrain(flushRegion)) {
                     // We have to delete that segment altogether.
                     cacheControlImpl.trace(
                         "discard segment - it cannot be constrained and maintain consistency: "
                         + header.getDescription());
-                    remove(aggMan, header);
+                    cacheMgr.remove(cacheMgr, header);
                     continue;
                 }
                 final SegmentHeader newHeader =
                     header.constrain(flushRegion);
-                for (SegmentCacheWorker worker
-                    : aggMan.segmentCacheWorkers)
+                for (final SegmentCacheWorker worker
+                    : cacheMgr.segmentCacheWorkers)
                 {
-                    if (worker.supportsRichIndex()) {
-                        final SegmentBody sb = worker.get(header);
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                        if (sb != null) {
-                            worker.put(newHeader, sb);
-                        }
-                    } else {
-                        // The cache doesn't support rich index. We have
-                        // to clear the segment entirely.
-                        if (worker.contains(header)) {
-                            worker.remove(header);
-                        }
-                    }
+                    callableList.add(
+                        new Callable<Boolean>() {
+                            public Boolean call() throws Exception {
+                                boolean existed;
+                                if (worker.supportsRichIndex()) {
+                                    final SegmentBody sb = worker.get(header);
+                                    existed = worker.remove(header);
+                                    if (sb != null) {
+                                        worker.put(newHeader, sb);
+                                    }
+                                } else {
+                                    // The cache doesn't support rich index. We
+                                    // have to clear the segment entirely.
+                                    existed = worker.remove(header);
+                                }
+                                return existed;
+                            }
+                        });
                 }
-                segmentIndex.remove(header);
-                segmentIndex.add(newHeader);
+                cacheMgr.segmentIndex.remove(header);
+                cacheMgr.segmentIndex.add(newHeader, null, null);
             }
 
             // Done
-            return null;
+            return new FlushResult(callableList);
+        }
+    }
+
+    /**
+     * Result of a {@link FlushCommand}. Contains a list of tasks that must
+     * be executed by the caller (or by an executor) to flush segments from the
+     * external cache(s).
+     */
+    public static class FlushResult {
+        public final List<Callable<Boolean>> tasks;
+
+        public FlushResult(List<Callable<Boolean>> tasks) {
+            this.tasks = tasks;
+        }
+    }
+
+    /**
+     * Special exception, thrown only by {@link ShutdownCommand}, telling
+     * the actor to shut down.
+     */
+    private static class PleaseShutdownException extends RuntimeException {
+        private PleaseShutdownException() {
         }
     }
 
     private static class ShutdownCommand implements Command<String> {
+        public ShutdownCommand() {
+        }
+
         public String call() throws Exception {
-            return "Shutdown succeeded";
+            throw new PleaseShutdownException();
+        }
+
+        public Locus getLocus() {
+            return null;
         }
     }
 
@@ -674,14 +779,22 @@ public class SegmentCacheManager {
                         if (message instanceof Command<?>) {
                             Command<?> command = (Command<?>) message;
                             try {
+                                Locus.push(command.getLocus());
                                 Object result = command.call();
                                 responseQueue.put(
                                     command,
                                     Pair.of(result, (Throwable) null));
+                            } catch (PleaseShutdownException e) {
+                                responseQueue.put(
+                                    command,
+                                    Pair.of(null, (Throwable) null));
+                                return; // exit event loop
                             } catch (Throwable e) {
                                 responseQueue.put(
                                     command,
                                     Pair.of(null, e));
+                            } finally {
+                                Locus.pop(command.getLocus());
                             }
                         } else {
                             Event event = (Event) message;
@@ -694,12 +807,11 @@ public class SegmentCacheManager {
                         // REVIEW: Somewhere better to send it?
                         e.printStackTrace();
                     }
-                    if (message instanceof ShutdownCommand) {
-                        return;
-                    }
                 }
             } catch (InterruptedException e) {
                 // REVIEW: Somewhere better to send it?
+                e.printStackTrace();
+            } catch (Throwable e) {
                 e.printStackTrace();
             }
         }
@@ -739,55 +851,24 @@ public class SegmentCacheManager {
     }
 
     private static class SegmentLoadSucceededEvent extends Event {
-        private final FutureTask<Segment> task;
-        private final Segment segment;
-        private final SegmentDataset dataset;
-
-        public SegmentLoadSucceededEvent(
-            FutureTask<Segment> task,
-            Segment segment,
-            SegmentDataset dataset)
-        {
-            this.task = task;
-            this.segment = segment;
-            this.dataset = dataset;
-        }
-
-        public void acceptWithoutResponse(Visitor visitor) {
-            visitor.visit(this);
-        }
-    }
-
-    private static class SegmentLoadFailedEvent extends Event {
-        private final Segment segment;
-        private final Throwable throwable;
-
-        public SegmentLoadFailedEvent(
-            Segment segment,
-            Throwable throwable)
-        {
-            this.segment = segment;
-            this.throwable = throwable;
-        }
-
-        public void acceptWithoutResponse(Visitor visitor) {
-            visitor.visit(this);
-        }
-    }
-
-    private static class SegmentAddEvent extends Event {
-        private final AggregationManager aggMgr;
+        private final SegmentCacheManager cacheMgr;
         private final SegmentHeader header;
         private final SegmentBody body;
+        private final Locus locus;
+        private final long timestamp;
 
-        public SegmentAddEvent(
-            AggregationManager aggMgr,
+        public SegmentLoadSucceededEvent(
+            long timestamp,
+            Locus locus,
+            SegmentCacheManager cacheMgr,
             SegmentHeader header,
             SegmentBody body)
         {
+            this.timestamp = timestamp;
+            this.locus = locus;
             assert header != null;
-            assert aggMgr != null;
-            this.aggMgr = aggMgr;
+            assert cacheMgr != null;
+            this.cacheMgr = cacheMgr;
             this.header = header;
             this.body = body; // may be null
         }
@@ -797,17 +878,51 @@ public class SegmentCacheManager {
         }
     }
 
-    private static class SegmentRemoveEvent extends Event {
-        private final AggregationManager aggMgr;
+    private static class SegmentLoadFailedEvent extends Event {
+        private final SegmentCacheManager cacheMgr;
         private final SegmentHeader header;
+        private final Locus locus;
+        private final Throwable throwable;
+        private final long timestamp;
+
+        public SegmentLoadFailedEvent(
+            long timestamp,
+            Locus locus,
+            SegmentCacheManager cacheMgr,
+            SegmentHeader header,
+            Throwable throwable)
+        {
+            this.timestamp = timestamp;
+            this.locus = locus;
+            this.throwable = throwable;
+            assert header != null;
+            assert cacheMgr != null;
+            this.cacheMgr = cacheMgr;
+            this.header = header;
+        }
+
+        public void acceptWithoutResponse(Visitor visitor) {
+            visitor.visit(this);
+        }
+    }
+
+    private static class SegmentRemoveEvent extends Event {
+        private final SegmentCacheManager cacheMgr;
+        private final SegmentHeader header;
+        private final long timestamp;
+        private final Locus locus;
 
         public SegmentRemoveEvent(
-            AggregationManager aggMgr,
+            long timestamp,
+            Locus locus,
+            SegmentCacheManager cacheMgr,
             SegmentHeader header)
         {
+            this.timestamp = timestamp;
+            this.locus = locus;
             assert header != null;
-            assert aggMgr != null;
-            this.aggMgr = aggMgr;
+            assert cacheMgr != null;
+            this.cacheMgr = cacheMgr;
             this.header = header;
         }
 
@@ -817,16 +932,22 @@ public class SegmentCacheManager {
     }
 
     private static class ExternalSegmentCreatedEvent extends Event {
-        private final AggregationManager aggMgr;
+        private final SegmentCacheManager cacheMgr;
         private final SegmentHeader header;
+        private final long timestamp;
+        private final Locus locus;
 
         public ExternalSegmentCreatedEvent(
-            AggregationManager aggMgr,
+            long timestamp,
+            Locus locus,
+            SegmentCacheManager cacheMgr,
             SegmentHeader header)
         {
+            this.timestamp = timestamp;
+            this.locus = locus;
             assert header != null;
-            assert aggMgr != null;
-            this.aggMgr = aggMgr;
+            assert cacheMgr != null;
+            this.cacheMgr = cacheMgr;
             this.header = header;
         }
 
@@ -836,21 +957,255 @@ public class SegmentCacheManager {
     }
 
     private static class ExternalSegmentDeletedEvent extends Event {
-        private final AggregationManager aggMgr;
+        private final SegmentCacheManager cacheMgr;
         private final SegmentHeader header;
 
         public ExternalSegmentDeletedEvent(
-            AggregationManager aggMgr,
+            SegmentCacheManager cacheMgr,
             SegmentHeader header)
         {
             assert header != null;
-            assert aggMgr != null;
-            this.aggMgr = aggMgr;
+            assert cacheMgr != null;
+            this.cacheMgr = cacheMgr;
             this.header = header;
         }
 
         public void acceptWithoutResponse(Visitor visitor) {
             visitor.visit(this);
+        }
+    }
+
+    /**
+     * Implementation of SegmentCacheListener that updates the
+     * segment index of its aggregation manager instance when it receives
+     * events from its assigned SegmentCache implementation.
+     */
+    private static class AsyncCacheListener
+        implements SegmentCache.SegmentCacheListener
+    {
+        private final SegmentCacheManager cacheMgr;
+
+        public AsyncCacheListener(SegmentCacheManager cacheMgr) {
+            this.cacheMgr = cacheMgr;
+        }
+
+        public void handle(final SegmentCacheEvent e) {
+            if (e.isLocal()) {
+                return;
+            }
+            final SegmentCacheManager.Command<Void> command;
+            final Locus locus = Locus.peek();
+            switch (e.getEventType()) {
+            case ENTRY_CREATED:
+                command =
+                    new Command<Void>() {
+                        public Void call() {
+                            cacheMgr.externalSegmentCreated(e.getSource());
+                            return null;
+                        }
+
+                        public Locus getLocus() {
+                            return locus;
+                        }
+                    };
+                break;
+            case ENTRY_DELETED:
+                command =
+                    new Command<Void>() {
+                        public Void call() {
+                            cacheMgr.externalSegmentDeleted(e.getSource());
+                            return null;
+                        }
+
+                        public Locus getLocus() {
+                            return locus;
+                        }
+                    };
+                break;
+            default:
+                throw new UnsupportedOperationException();
+            }
+            cacheMgr.execute(command);
+        }
+    }
+
+    /**
+     * Makes a collection of {@link SegmentCacheWorker} objects (each of which
+     * is backed by a {@link SegmentCache} appear to be a SegmentCache.
+     *
+     * <p>For most operations, it is easier to operate on a single cache.
+     * It is usually clear whether operations should quit when finding the first
+     * match, or to operate on all workers. (For example, {@link #remove} tries
+     * to remove the segment header from all workers, and returns whether it
+     * was removed from any of them.) This class just does what seems
+     * most typical. If you want another behavior for a particular operation,
+     * operate on the workers directly.</p>
+     */
+    private static class CompositeSegmentCache implements SegmentCache {
+        private final List<SegmentCacheWorker> workers;
+
+        public CompositeSegmentCache(List<SegmentCacheWorker> workers) {
+            this.workers = workers;
+        }
+
+        public SegmentBody get(SegmentHeader header) {
+            for (SegmentCacheWorker worker : workers) {
+                final SegmentBody body = worker.get(header);
+                if (body != null) {
+                    return body;
+                }
+            }
+            return null;
+        }
+
+        public boolean contains(SegmentHeader header) {
+            for (SegmentCacheWorker worker : workers) {
+                if (worker.contains(header)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public List<SegmentHeader> getSegmentHeaders() {
+            // Special case 0 and 1 workers, for which the 'union' operation
+            // is trivial.
+            switch (workers.size()) {
+            case 0:
+                return Collections.emptyList();
+            case 1:
+                return workers.get(0).getSegmentHeaders();
+            default:
+                final List<SegmentHeader> list = new ArrayList<SegmentHeader>();
+                final Set<SegmentHeader> set = new HashSet<SegmentHeader>();
+                for (SegmentCacheWorker worker : workers) {
+                    for (SegmentHeader header : worker.getSegmentHeaders()) {
+                        if (set.add(header)) {
+                            list.add(header);
+                        }
+                    }
+                }
+                return list;
+            }
+        }
+
+        public boolean put(SegmentHeader header, SegmentBody body) {
+            for (SegmentCacheWorker worker : workers) {
+                worker.put(header, body);
+            }
+            return true;
+        }
+
+        public boolean remove(SegmentHeader header) {
+            boolean result = false;
+            for (SegmentCacheWorker worker : workers) {
+                if (worker.remove(header)) {
+                    result = true;
+                }
+            }
+            return result;
+        }
+
+        public void tearDown() {
+            // nothing
+        }
+
+        public void addListener(SegmentCacheListener listener) {
+            // nothing
+        }
+
+        public void removeListener(SegmentCacheListener listener) {
+            // nothing
+        }
+
+        public boolean supportsRichIndex() {
+            return false;
+        }
+    }
+
+    /**
+     * Locates segments in the cache that satisfy a given request.
+     *
+     * <p>The result consists of (a) a list of segment headers, (b) a list
+     * of futures for segment bodies that are currently being loaded, (c)
+     * converters to convert headers into {@link SegmentWithData}.</p>
+     *
+     * <p>For (a), the client should call the cache to get the body for each
+     * segment header; it is possible that there is no body in the cache.
+     * For (b), the client will have to wait for the segment to arrive.</p>
+     */
+    private class PeekCommand
+        implements SegmentCacheManager.Command<PeekResponse>
+    {
+        private final CellRequest request;
+        private final Locus locus;
+
+        /**
+         * Creates a PeekCommand.
+         *
+         * @param request Cell request
+         * @param locus Locus
+         */
+        public PeekCommand(
+            CellRequest request,
+            Locus locus)
+        {
+            this.request = request;
+            this.locus = locus;
+        }
+
+        public PeekResponse call() {
+            final RolapStar.Measure measure = request.getMeasure();
+            final RolapStar star = measure.getStar();
+            final RolapSchema schema = star.getSchema();
+            final AggregationKey key = new AggregationKey(request);
+            final List<SegmentHeader> headers =
+                segmentIndex.locate(
+                    schema.getName(),
+                    schema.getChecksum(),
+                    measure.getCubeName(),
+                    measure.getName(),
+                    star.getFactTable().getAlias(),
+                    request.getConstrainedColumnsBitKey(),
+                    request.getMappedCellValues(),
+                    AggregationKey.getCompoundPredicateStringList(
+                        star,
+                        key.getCompoundPredicateList()));
+
+            final Map<SegmentHeader, Future<SegmentBody>> headerMap =
+                new HashMap<SegmentHeader, Future<SegmentBody>>();
+            final Map<List, SegmentBuilder.SegmentConverter> converterMap =
+                new HashMap<List, SegmentBuilder.SegmentConverter>();
+
+            // Is there a pending segment? (A segment that has been created and
+            // is loading via SQL.)
+            for (SegmentHeader header : headers) {
+                converterMap.put(
+                    SegmentCacheIndexImpl.makeConverterKey(header),
+                    getConverter(header));
+                headerMap.put(
+                    header,
+                    segmentIndex.getFuture(header));
+            }
+
+            return new PeekResponse(headerMap, converterMap);
+        }
+
+        public Locus getLocus() {
+            return locus;
+        }
+    }
+
+    private static class PeekResponse {
+        public final Map<SegmentHeader, Future<SegmentBody>> headerMap;
+        public final Map<List, SegmentBuilder.SegmentConverter> converterMap;
+
+        public PeekResponse(
+            Map<SegmentHeader, Future<SegmentBody>> headerMap,
+            Map<List, SegmentBuilder.SegmentConverter> converterMap)
+        {
+            this.headerMap = headerMap;
+            this.converterMap = converterMap;
         }
     }
 }

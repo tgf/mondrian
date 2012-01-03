@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2003-2011 Julian Hyde
+// Copyright (C) 2003-2012 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -29,6 +29,8 @@ import java.util.List;
 public interface Aggregator {
     /**
      * Returns the aggregator used to combine sub-totals into a grand-total.
+     *
+     * @return aggregator used to combine sub-totals into a grand-total
      */
     Aggregator getRollup();
 
@@ -39,6 +41,8 @@ public interface Aggregator {
      * @param evaluator Evaluation context
      * @param members List of members, not null
      * @param calc Expression to evaluate
+     *
+     * @return result of applying this aggregator to a set of members/tuples
      */
     Object aggregate(Evaluator evaluator, TupleList members, Calc calc);
 
@@ -46,12 +50,12 @@ public interface Aggregator {
      * Tells Mondrian if this aggregator can perform fast aggregation
      * using only the raw data of a given object type. This will
      * determine if Mondrian will attempt to perform in-memory rollups
-     * on raw segment data by invoking {@link Aggregator#aggregate(Object[])}.
+     * on raw segment data by invoking {@link #aggregate(java.util.List)}.
      *
      * <p>This is only invoked for rollup operations.
      *
      * @param datatype The datatype of the object we would like to rollup.
-     * @return True or false, depending on the support status.
+     * @return Whether this aggregator supports fast aggregation
      */
     boolean supportsFastAggregates(Datatype datatype);
 
@@ -60,8 +64,8 @@ public interface Aggregator {
      * operation. This is useful when the values are already resolved
      * and we are dealing with a raw {@link SegmentBody} object.
      *
-     * <p>Only gets called if {@link Aggregator#supportsFastAggregates()}
-     * is true.
+     * <p>Only gets called if
+     * {@link #supportsFastAggregates(mondrian.spi.Dialect.Datatype)} is true.
      *
      * <p>This is only invoked for rollup operations.
      *

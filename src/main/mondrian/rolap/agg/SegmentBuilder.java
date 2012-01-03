@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -83,9 +83,7 @@ public class SegmentBuilder {
                 new DenseObjectSegmentDataset(
                     axes, (Object[]) body.getValueArray());
         } else if (body instanceof SparseSegmentBody) {
-            dataSet =
-                new SparseSegmentDataset(
-                    ((SparseSegmentBody)body).getCellKeyValueMap());
+            dataSet = new SparseSegmentDataset(body.getValueMap());
         } else {
             throw Util.newInternal(
                 "Unknown segment body type: " + body.getClass() + ": " + body);
@@ -118,7 +116,7 @@ public class SegmentBuilder {
         for (int i = 0; i < constrainedColumns.length; i++) {
             RolapStar.Column constrainedColumn = constrainedColumns[i];
             final SortedSet<Comparable<?>> values =
-                header.getConstrainedColumns()[i].values;
+                header.getConstrainedColumns().get(i).values;
             StarColumnPredicate predicate;
             if (values == null) {
                 predicate =
@@ -213,14 +211,26 @@ public class SegmentBuilder {
                 final SortedSet<Comparable<?>> requestedValues =
                     headerColumn.getValues();
                 if (axis.valueSet == null) {
-                    axis.valueSet = values;
+                    axis.valueSet = new TreeSet<Comparable<?>>(values);
                     axis.hasNull = hasNull;
                     axis.requestedValues = requestedValues;
                 } else {
-                    axis.valueSet = ArraySortedSet.intersect(
-                        values,
-                        axis.valueSet);
-                    axis.hasNull = hasNull && axis.hasNull;
+                    final SortedSet<Comparable<?>> filteredValues;
+                    final boolean filteredHasNull;
+                    if (axis.requestedValues == null) {
+                        filteredValues = values;
+                        filteredHasNull = hasNull;
+                    } else {
+                        filteredValues = Util.intersect(
+                            values,
+                            axis.requestedValues);
+
+                        // SegmentColumn predicates cannot ask for the null
+                        // value (at present).
+                        filteredHasNull = false;
+                    }
+                    axis.valueSet.addAll(filteredValues);
+                    axis.hasNull = axis.hasNull || filteredHasNull;
                     if (!Util.equals(axis.requestedValues, requestedValues)) {
                         if (axis.requestedValues == null) {
                             // Downgrade from wildcard to a specific list.
@@ -233,13 +243,13 @@ public class SegmentBuilder {
                         }
                     }
                 }
-                // FIXME: don't do this every time
-                axis.values =
-                    axis.valueSet.toArray(new Comparable[axis.valueSet.size()]);
             }
         }
 
-        // XXXXXXXX
+        for (AxisInfo axis : axes) {
+            axis.values =
+                axis.valueSet.toArray(new Comparable[axis.valueSet.size()]);
+        }
 
         // Populate cells.
         //
@@ -258,7 +268,7 @@ public class SegmentBuilder {
         for (Map.Entry<SegmentHeader, SegmentBody> entry : map.entrySet()) {
             final int[] pos = new int[axes.length];
             final Comparable<?>[][] valueArrays =
-                new Comparable[firstHeader.getConstrainedColumns().length][];
+                new Comparable[firstHeader.getConstrainedColumns().size()][];
             final SegmentBody body = entry.getValue();
 
             // Copy source value sets into arrays. For axes that are being
@@ -266,7 +276,7 @@ public class SegmentBuilder {
             z = 0;
             for (SortedSet<Comparable<?>> set : body.getAxisValueSets()) {
                 valueArrays[z] = keepColumns.contains(
-                    firstHeader.getConstrainedColumns()[z].columnExpression)
+                    firstHeader.getConstrainedColumns().get(z).columnExpression)
                         ? set.toArray(new Comparable[set.size()])
                         : null;
                 ++z;
@@ -400,17 +410,17 @@ public class SegmentBuilder {
         }
 
         // Create header.
-        final SegmentColumn[] constrainedColumns =
-            new SegmentColumn[axes.length];
+        final List<SegmentColumn> constrainedColumns =
+            new ArrayList<SegmentColumn>();
         for (int i = 0; i < axes.length; i++) {
             AxisInfo axisInfo = axes[i];
-            constrainedColumns[i] =
+            constrainedColumns.add(
                 new SegmentColumn(
                     axisInfo.column.getColumnExpression(),
                     axisInfo.column.getValueCount(),
                     axisInfo.lostPredicate
                         ? axisList.get(i).left
-                        : axisInfo.column.values);
+                        : axisInfo.column.values));
         }
         final SegmentHeader header =
             new SegmentHeader(
@@ -422,7 +432,7 @@ public class SegmentBuilder {
                 firstHeader.compoundPredicates,
                 firstHeader.rolapStarFactTableName,
                 targetBitkey,
-                new SegmentColumn[0]);
+                Collections.<SegmentColumn>emptyList());
 
         return Pair.of(header, body);
     }
@@ -457,21 +467,25 @@ public class SegmentBuilder {
             }
             this.cellCount = cellCount;
         }
+
         public void describe(StringBuilder buf) {
             // TODO
         }
-        public int getArrity() {
-            return header.getConstrainedColumns().length;
+
+        public int getArity() {
+            return header.getConstrainedColumns().size();
         }
+
         public int getCellCount() {
             return cellCount;
         }
+
         public boolean wouldContain(Object[] keys) {
-            assert keys.length == header.getConstrainedColumns().length;
+            assert keys.length == header.getConstrainedColumns().size();
             for (int i = 0; i < keys.length; i++) {
                 final SegmentColumn excl =
                     header.getExcludedRegion(
-                        header.getConstrainedColumns()[i].columnExpression);
+                        header.getConstrainedColumns().get(i).columnExpression);
                 if (excl == null) {
                     continue;
                 }
@@ -481,9 +495,11 @@ public class SegmentBuilder {
             }
             return false;
         }
+
         public ExcludedRegion get(int index) {
             return this;
         }
+
         public int size() {
             return 1;
         }
@@ -524,14 +540,14 @@ public class SegmentBuilder {
         return false;
     }
 
-    public static SegmentColumn[] toConstrainedColumns(
+    public static List<SegmentColumn> toConstrainedColumns(
         StarColumnPredicate[] predicates)
     {
         return toConstrainedColumns(
             Arrays.asList(predicates));
     }
 
-    public static SegmentColumn[] toConstrainedColumns(
+    public static List<SegmentColumn> toConstrainedColumns(
         Collection<StarColumnPredicate> predicates)
     {
         List<SegmentColumn> ccs =
@@ -561,7 +577,7 @@ public class SegmentBuilder {
                         new ArraySortedSet(valuesArray)));
             }
         }
-        return ccs.toArray(new SegmentColumn[ccs.size()]);
+        return ccs;
     }
 
     /**
@@ -573,7 +589,7 @@ public class SegmentBuilder {
      * @return A SegmentHeader describing the supplied Segment object.
      */
     public static SegmentHeader toHeader(Segment segment) {
-        final SegmentColumn[] cc =
+        final List<SegmentColumn> cc =
             SegmentBuilder.toConstrainedColumns(segment.predicates);
         final List<String> cp = new ArrayList<String>();
 
@@ -594,10 +610,109 @@ public class SegmentBuilder {
             segment.measure.getCubeName(),
             segment.measure.getName(),
             cc,
-            cp.toArray(new String[cp.size()]),
+            cp,
             segment.star.getFactTable().getAlias(),
             segment.constrainedColumnsBitKey,
-            new SegmentColumn[0]);
+            Collections.<SegmentColumn>emptyList());
+    }
+
+    private static RolapStar.Column[] getConstrainedColumns(
+        RolapStar star,
+        BitKey bitKey)
+    {
+        final List<RolapStar.Column> list =
+            new ArrayList<RolapStar.Column>();
+        for (int bit : bitKey) {
+            list.add(star.getColumn(bit));
+        }
+        return list.toArray(new RolapStar.Column[list.size()]);
+    }
+
+    /**
+     * Functor to convert a segment header and body into a
+     * {@link mondrian.rolap.agg.SegmentWithData}.
+     */
+    public static interface SegmentConverter {
+        SegmentWithData convert(
+            SegmentHeader header,
+            SegmentBody body);
+    }
+
+    /**
+     * Implementation of {@link SegmentConverter} that uses an
+     * {@link mondrian.rolap.agg.AggregationKey}
+     * and {@link mondrian.rolap.agg.CellRequest} as context to
+     * convert a {@link mondrian.spi.SegmentHeader}.
+     *
+     * <p>This is nasty. A converter might be used for several headers, not
+     * necessarily with the context as the cell request and aggregation key.
+     * Converters only exist for fact tables and compound predicate combinations
+     * for which we have already done a load request.</p>
+     *
+     * <p>It would be much better if there was a way to convert compound
+     * predicates from strings to predicates. Then we could obsolete the
+     * messy context inside converters, and maybe obsolete converters
+     * altogether.</p>
+     */
+    public static class SegmentConverterImpl implements SegmentConverter {
+        private final AggregationKey key;
+        private final CellRequest request;
+
+        public SegmentConverterImpl(AggregationKey key, CellRequest request) {
+            this.key = key;
+            this.request = request;
+        }
+
+        public SegmentWithData convert(
+            SegmentHeader header,
+            SegmentBody body)
+        {
+            final Segment segment =
+                toSegment(
+                    header,
+                    key.getStar(),
+                    header.getConstrainedColumnsBitKey(),
+                    getConstrainedColumns(
+                        key.getStar(),
+                        header.getConstrainedColumnsBitKey()),
+                    request.getMeasure(),
+                    key.getCompoundPredicateList());
+            return addData(segment, body);
+        }
+    }
+
+    /**
+     * Implementation of {@link SegmentConverter} that uses a star measure
+     * and a list of {@link StarPredicate}.
+     */
+    public static class StarSegmentConverter implements SegmentConverter {
+        private final RolapStar.Measure measure;
+        private final List<StarPredicate> compoundPredicateList;
+
+        public StarSegmentConverter(
+            RolapStar.Measure measure,
+            List<StarPredicate> compoundPredicateList)
+        {
+            this.measure = measure;
+            this.compoundPredicateList = compoundPredicateList;
+        }
+
+        public SegmentWithData convert(
+            SegmentHeader header,
+            SegmentBody body)
+        {
+            final Segment segment =
+                toSegment(
+                    header,
+                    measure.getStar(),
+                    header.getConstrainedColumnsBitKey(),
+                    getConstrainedColumns(
+                        measure.getStar(),
+                        header.getConstrainedColumnsBitKey()),
+                    measure,
+                    compoundPredicateList);
+            return addData(segment, body);
+        }
     }
 }
 

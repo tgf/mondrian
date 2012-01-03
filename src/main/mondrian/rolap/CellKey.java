@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2010 Julian Hyde and others
+// Copyright (C) 2001-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -25,8 +25,8 @@ import java.util.Arrays;
  *
  * <p>It is important that CellKey is memory-efficient, and that the
  * {@link Object#hashCode} and {@link Object#equals} methods are extremely
- * efficient. There are particular implementations for the
- * most likely cases where the number of axes is 1, 2, 3 and 4 as well as a general
+ * efficient. There are particular implementations for the most likely cases
+ * where the number of axes is 1, 2, 3 and 4 as well as a general
  * implementation.
  *
  * <p>To create a key, call the
@@ -502,8 +502,10 @@ public interface CellKey extends Serializable {
          * Creates a Four.
          */
         private Four(
-                int ordinal0, int ordinal1,
-                int ordinal2, int ordinal3)
+            int ordinal0,
+            int ordinal1,
+            int ordinal2,
+            int ordinal3)
         {
             this.ordinal0 = ordinal0;
             this.ordinal1 = ordinal1;

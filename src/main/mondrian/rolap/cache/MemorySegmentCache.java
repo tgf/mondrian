@@ -4,18 +4,16 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // You must accept the terms of that agreement to use this software.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 */
 package mondrian.rolap.cache;
 
 import mondrian.spi.*;
-import mondrian.util.CompletedFuture;
 
 import java.lang.ref.SoftReference;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Future;
 
 /**
  * Implementation of {@link mondrian.spi.SegmentCache} that stores segments
@@ -36,54 +34,59 @@ public class MemorySegmentCache implements SegmentCache {
     private final List<SegmentCacheListener> listeners =
         new CopyOnWriteArrayList<SegmentCacheListener>();
 
-    public Future<SegmentBody> get(SegmentHeader header) {
-        try {
-            final SoftReference<SegmentBody> ref = map.get(header);
-            if (ref == null) {
-                return CompletedFuture.success(null);
-            }
-            final SegmentBody body = ref.get();
-            if (body == null) {
-                map.remove(header);
-            }
-            return CompletedFuture.success(body);
-        } catch (Throwable e) {
-            return CompletedFuture.fail(e);
+    public SegmentBody get(SegmentHeader header) {
+        final SoftReference<SegmentBody> ref = map.get(header);
+        if (ref == null) {
+            return null;
         }
+        final SegmentBody body = ref.get();
+        if (body == null) {
+            map.remove(header);
+        }
+        return body;
     }
 
-    public Future<Boolean> contains(SegmentHeader header) {
-        try {
-            final SoftReference<SegmentBody> ref = map.get(header);
-            if (ref == null) {
-                return CompletedFuture.success(Boolean.FALSE);
-            }
-            final SegmentBody body = ref.get();
-            if (body == null) {
-                map.remove(header);
-                return CompletedFuture.success(Boolean.FALSE);
-            }
-            return CompletedFuture.success(Boolean.TRUE);
-        } catch (Throwable e) {
-            return CompletedFuture.fail(e);
+    public boolean contains(SegmentHeader header) {
+        final SoftReference<SegmentBody> ref = map.get(header);
+        if (ref == null) {
+            return false;
         }
+        final SegmentBody body = ref.get();
+        if (body == null) {
+            map.remove(header);
+            return false;
+        }
+        return true;
     }
 
-    public Future<List<SegmentHeader>> getSegmentHeaders() {
-        try {
-            final List<SegmentHeader> list =
-                new ArrayList<SegmentHeader>(map.keySet());
-            return CompletedFuture.success(list);
-        } catch (Throwable e) {
-            return CompletedFuture.fail(e);
-        }
+    public List<SegmentHeader> getSegmentHeaders() {
+        return new ArrayList<SegmentHeader>(map.keySet());
     }
 
-    public Future<Boolean> put(final SegmentHeader header, SegmentBody body) {
-        // REVIEW: What's the difference between returning Future(false)
-        // and returning Future(exception)?
-        try {
-            map.put(header, new SoftReference<SegmentBody>(body));
+    public boolean put(final SegmentHeader header, SegmentBody body) {
+        // REVIEW: What's the difference between returning false
+        // and throwing an exception?
+        map.put(header, new SoftReference<SegmentBody>(body));
+        fireSegmentCacheEvent(
+            new SegmentCache.SegmentCacheListener.SegmentCacheEvent() {
+                public boolean isLocal() {
+                    return true;
+                }
+                public SegmentHeader getSource() {
+                    return header;
+                }
+                public EventType getEventType() {
+                    return SegmentCacheListener.SegmentCacheEvent
+                        .EventType.ENTRY_CREATED;
+                }
+            });
+        return true; // success
+    }
+
+    public boolean remove(final SegmentHeader header) {
+        final boolean result =
+            map.remove(header) != null;
+        if (result) {
             fireSegmentCacheEvent(
                 new SegmentCache.SegmentCacheListener.SegmentCacheEvent() {
                     public boolean isLocal() {
@@ -95,39 +98,11 @@ public class MemorySegmentCache implements SegmentCache {
                     public EventType getEventType() {
                         return
                             SegmentCacheListener.SegmentCacheEvent
-                                .EventType.ENTRY_CREATED;
+                                .EventType.ENTRY_DELETED;
                     }
                 });
-            return CompletedFuture.success(Boolean.TRUE);
-        } catch (Throwable e) {
-            return CompletedFuture.fail(e);
         }
-    }
-
-    public Future<Boolean> remove(final SegmentHeader header) {
-        try {
-            final boolean result =
-                map.remove(header) != null;
-            if (result) {
-                fireSegmentCacheEvent(
-                    new SegmentCache.SegmentCacheListener.SegmentCacheEvent() {
-                        public boolean isLocal() {
-                            return true;
-                        }
-                        public SegmentHeader getSource() {
-                            return header;
-                        }
-                        public EventType getEventType() {
-                            return
-                                SegmentCacheListener.SegmentCacheEvent
-                                    .EventType.ENTRY_DELETED;
-                        }
-                    });
-            }
-            return CompletedFuture.success(result);
-        } catch (Throwable e) {
-            return CompletedFuture.fail(e);
-        }
+        return result;
     }
 
     public void tearDown() {
@@ -135,12 +110,12 @@ public class MemorySegmentCache implements SegmentCache {
         listeners.clear();
     }
 
-    public void addListener(SegmentCacheListener l) {
-        listeners.add(l);
+    public void addListener(SegmentCacheListener listener) {
+        listeners.add(listener);
     }
 
-    public void removeListener(SegmentCacheListener l) {
-        listeners.remove(l);
+    public void removeListener(SegmentCacheListener listener) {
+        listeners.remove(listener);
     }
 
     public boolean supportsRichIndex() {
@@ -150,8 +125,8 @@ public class MemorySegmentCache implements SegmentCache {
     public void fireSegmentCacheEvent(
         SegmentCache.SegmentCacheListener.SegmentCacheEvent evt)
     {
-        for (SegmentCacheListener l : listeners) {
-            l.handle(evt);
+        for (SegmentCacheListener listener : listeners) {
+            listener.handle(evt);
         }
     }
 }

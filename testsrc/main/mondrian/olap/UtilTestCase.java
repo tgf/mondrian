@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2004-2011 Julian Hyde and others
+// Copyright (C) 2004-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -1264,13 +1264,56 @@ public class UtilTestCase extends TestCase {
             new ArraySortedSet(new String[]{ "b", "d", "e"});
         final ArraySortedSet<String> empty =
             new ArraySortedSet(new String[]{});
-        checkToString("[a, c, e]", ArraySortedSet.intersect(ace, ace));
-        checkToString("[c]", ArraySortedSet.intersect(ace, cd));
-        checkToString("[]", ArraySortedSet.intersect(ace, empty));
-        checkToString("[]", ArraySortedSet.intersect(empty, ace));
-        checkToString("[]", ArraySortedSet.intersect(empty, empty));
-        checkToString("[]", ArraySortedSet.intersect(ace, bdf));
-        checkToString("[e]", ArraySortedSet.intersect(ace, bde));
+        checkToString("[a, c, e]", Util.intersect(ace, ace));
+        checkToString("[c]", Util.intersect(ace, cd));
+        checkToString("[]", Util.intersect(ace, empty));
+        checkToString("[]", Util.intersect(empty, ace));
+        checkToString("[]", Util.intersect(empty, empty));
+        checkToString("[]", Util.intersect(ace, bdf));
+        checkToString("[e]", Util.intersect(ace, bde));
+    }
+
+    /**
+     * Unit test for {@link Triple}.
+     */
+    public void testTriple() {
+        if (Util.PreJdk15) {
+            // Boolean is not Comparable until JDK 1.5. Triple works, but this
+            // test does not.
+            return;
+        }
+        final Triple<Integer, String, Boolean> triple0 =
+            Triple.of(5, "foo", true);
+        final Triple<Integer, String, Boolean> triple1 =
+            Triple.of(5, "foo", false);
+        final Triple<Integer, String, Boolean> triple2 =
+            Triple.of(5, "foo", true);
+        final Triple<Integer, String, Boolean> triple3 =
+            Triple.of(null, "foo", true);
+
+        assertEquals(triple0,  triple0);
+        assertFalse(triple0.equals(triple1));
+        assertFalse(triple1.equals(triple0));
+        assertFalse(triple0.hashCode() == triple1.hashCode());
+        assertEquals(triple0, triple2);
+        assertEquals(triple0.hashCode(), triple2.hashCode());
+        assertEquals(triple3, triple3);
+        assertFalse(triple0.equals(triple3));
+        assertFalse(triple3.equals(triple0));
+        assertFalse(triple0.hashCode() == triple3.hashCode());
+
+        final SortedSet<Triple<Integer, String, Boolean>> set =
+            new TreeSet<Triple<Integer, String, Boolean>>(
+                Arrays.asList(triple0, triple1, triple2, triple3, triple1));
+        assertEquals(3, set.size());
+        assertEquals(
+            "[<null, foo, true>, <5, foo, false>, <5, foo, true>]",
+            set.toString());
+
+        assertEquals("<5, foo, true>", triple0.toString());
+        assertEquals("<5, foo, false>", triple1.toString());
+        assertEquals("<5, foo, true>", triple2.toString());
+        assertEquals("<null, foo, true>", triple3.toString());
     }
 }
 

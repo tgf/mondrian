@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2011 Julian Hyde and others
+// Copyright (C) 2001-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -20,6 +20,7 @@ import mondrian.rolap.sql.SqlQuery;
 import mondrian.server.Locus;
 import mondrian.spi.*;
 import mondrian.util.Bug;
+import mondrian.util.Pair;
 
 import org.apache.log4j.Logger;
 
@@ -36,8 +37,8 @@ import javax.sql.DataSource;
  * A <code>RolapStar</code> is a star schema. It is the means to read cell
  * values.
  *
- * <p>todo: put this in package which specicializes in relational aggregation,
- * doesn't know anything about hierarchies etc.
+ * <p>todo: Move this class into a package that specializes in relational
+ * aggregation, doesn't know anything about hierarchies etc.
  *
  * @author jhyde
  * @since 12 August, 2001
@@ -175,56 +176,16 @@ public class RolapStar {
             return result;
         }
         // Now ask the segment cache manager.
-        final AggregationKey aggregationKey = new AggregationKey(request);
-        return getAggregationManager().cacheMgr.execute(
-            new SegmentCacheManager.Command<Object>() {
-                public Object call() throws Exception {
-                    final List<SegmentHeader> headers =
-                        getAggregationManager().cacheMgr
-                            .segmentIndex.locate(
-                                schema.getName(),
-                                schema.getChecksum(),
-                                request.getMeasure().cubeName,
-                                request.getMeasure().getName(),
-                                request.getMeasure().getStar()
-                                    .getFactTable().getAlias(),
-                                request.getConstrainedColumnsBitKey(),
-                                request.getMappedCellValues(),
-                                AggregationKey.getCompoundPredicateArray(
-                                    RolapStar.this,
-                                    aggregationKey
-                                        .getCompoundPredicateList()));
-                    if (headers.size() == 0) {
-                        return null;
-                    }
-                    SegmentBody sb = null;
-                    workerLoop:
-                    for (SegmentCacheWorker worker
-                        : getAggregationManager().segmentCacheWorkers)
-                    {
-                        for (SegmentHeader header : headers) {
-                            if (worker.contains(header)) {
-                                sb = worker.get(header);
-                                break workerLoop;
-                            }
-                        }
-                    }
-                    if (sb == null) {
-                        return null;
-                    }
-                    final Segment emptySegment =
-                        SegmentBuilder.toSegment(
-                            headers.get(0),
-                            RolapStar.this,
-                            request.getConstrainedColumnsBitKey(),
-                            request.getConstrainedColumns(),
-                            request.getMeasure(),
-                            aggregationKey.getCompoundPredicateList());
-                    final SegmentWithData segment =
-                        SegmentBuilder.addData(emptySegment, sb);
-                    return segment.getCellValue(request.getSingleValues());
-                }
-            });
+        return getCellFromExternalCache(request);
+    }
+
+    private Object getCellFromExternalCache(CellRequest request) {
+        final SegmentWithData segment =
+            getAggregationManager().cacheMgr.peek(request);
+        if (segment == null) {
+            return null;
+        }
+        return segment.getCellValue(request.getSingleValues());
     }
 
     public void register(SegmentWithData segment) {
@@ -608,7 +569,6 @@ public class RolapStar {
 
         aggregation =
             new Aggregation(
-                getAggregationManager(),
                 aggregationKey);
 
         localBars.get().aggregations.put(aggregationKey, aggregation);

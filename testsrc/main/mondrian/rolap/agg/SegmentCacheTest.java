@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -37,9 +37,10 @@ public class SegmentCacheTest extends BasicQueryTest {
             MondrianProperties.instance().DisableCaching,
             true);
         this.mockCache = new MockSegmentCache();
-        this.testWorker = new SegmentCacheWorker(mockCache);
+        this.testWorker = new SegmentCacheWorker(mockCache, null);
         MondrianServer.forConnection(getTestContext().getConnection())
-            .getAggregationManager().segmentCacheWorkers.add(testWorker);
+            .getAggregationManager().cacheMgr.segmentCacheWorkers
+            .add(testWorker);
         getTestContext().getConnection().getCacheControl(null)
             .flushSchemaCache();
     }
@@ -48,7 +49,8 @@ public class SegmentCacheTest extends BasicQueryTest {
     protected void tearDown() throws Exception {
         propSaver.reset();
         MondrianServer.forConnection(getTestContext().getConnection())
-            .getAggregationManager().segmentCacheWorkers.remove(testWorker);
+            .getAggregationManager().cacheMgr.segmentCacheWorkers
+            .remove(testWorker);
         getTestContext().getConnection().getCacheControl(null)
             .flushSchemaCache();
         super.tearDown();
@@ -82,6 +84,14 @@ public class SegmentCacheTest extends BasicQueryTest {
     }
 
     public void testSegmentCacheEvents() throws Exception {
+        // Flush the cache before we start. Wait a second for the cache
+        // flush to propagate.
+        final CacheControl cc =
+            getTestContext().getConnection().getCacheControl(null);
+        Cube salesCube = getCube("Sales");
+        cc.flush(cc.createMeasuresRegion(salesCube));
+        Thread.sleep(1000);
+
         final List<SegmentHeader> createdHeaders =
             new ArrayList<SegmentHeader>();
         final List<SegmentHeader> deletedHeaders =
@@ -119,19 +129,7 @@ public class SegmentCacheTest extends BasicQueryTest {
             deletedHeaders.clear();
 
             // Now flush the segment and check the events.
-            final CacheControl cc =
-                getTestContext().getConnection().getCacheControl(null);
-            Cube salesCube = null;
-            for (Cube cube
-                : getConnection().getSchemaReader().withLocus().getCubes())
-            {
-                if (cube.getName().equals("Sales")) {
-                    salesCube = cube;
-                    break;
-                }
-            }
-            cc.flush(
-                cc.createMeasuresRegion(salesCube));
+            cc.flush(cc.createMeasuresRegion(salesCube));
 
             // Wait for propagation.
             Thread.sleep(2000);
@@ -143,6 +141,17 @@ public class SegmentCacheTest extends BasicQueryTest {
         } finally {
             mockCache.removeListener(listener);
         }
+    }
+
+    private Cube getCube(String cubeName) {
+        for (Cube cube
+            : getConnection().getSchemaReader().withLocus().getCubes())
+        {
+            if (cube.getName().equals(cubeName)) {
+                return cube;
+            }
+        }
+        return null;
     }
 }
 

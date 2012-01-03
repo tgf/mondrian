@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2003-2011 Julian Hyde
+// Copyright (C) 2003-2012 Julian Hyde
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -7400,6 +7400,115 @@ public class BasicQueryTest extends FoodMartTestCase {
             }).get();
 
         es.shutdownNow();
+    }
+
+    public void testRollup() {
+        switch (2) {
+        case 0:
+        assertQueryReturns(
+            "select [Gender].Children * [Product].Children on 0\n"
+            + "from [Sales]",
+            "Axis #0:\n"
+            + "{}\n"
+            + "Axis #1:\n"
+            + "{[Gender].[F], [Product].[Drink]}\n"
+            + "{[Gender].[F], [Product].[Food]}\n"
+            + "{[Gender].[F], [Product].[Non-Consumable]}\n"
+            + "{[Gender].[M], [Product].[Drink]}\n"
+            + "{[Gender].[M], [Product].[Food]}\n"
+            + "{[Gender].[M], [Product].[Non-Consumable]}\n"
+            + "Row #0: 12,202\n"
+            + "Row #0: 94,814\n"
+            + "Row #0: 24,542\n"
+            + "Row #0: 12,395\n"
+            + "Row #0: 97,126\n"
+            + "Row #0: 25,694\n");
+        // now, should be able to answer this one by rolling up gender
+        assertQueryReturns(
+            "select [Product].Children on 0\n"
+            + "from [Sales]",
+            "Axis #0:\n"
+            + "{}\n"
+            + "Axis #1:\n"
+            + "{[Product].[Drink]}\n"
+            + "{[Product].[Food]}\n"
+            + "{[Product].[Non-Consumable]}\n"
+            + "Row #0: 24,597\n"
+            + "Row #0: 191,940\n"
+            + "Row #0: 50,236\n");
+            break;
+        case 1:
+            assertQueryReturns(
+                "select [Gender].[M] * [Product].Children on 0\n"
+                + "from [Sales]",
+                "Axis #0:\n"
+                + "{}\n"
+                + "Axis #1:\n"
+                + "{[Gender].[M], [Product].[Drink]}\n"
+                + "{[Gender].[M], [Product].[Food]}\n"
+                + "{[Gender].[M], [Product].[Non-Consumable]}\n"
+                + "Row #0: 12,395\n"
+                + "Row #0: 97,126\n"
+                + "Row #0: 25,694\n");
+            assertQueryReturns(
+                "select [Gender].[F] * [Product].Children on 0\n"
+                + "from [Sales]",
+                "Axis #0:\n"
+                + "{}\n"
+                + "Axis #1:\n"
+                + "{[Gender].[F], [Product].[Drink]}\n"
+                + "{[Gender].[F], [Product].[Food]}\n"
+                + "{[Gender].[F], [Product].[Non-Consumable]}\n"
+                + "Row #0: 12,202\n"
+                + "Row #0: 94,814\n"
+                + "Row #0: 24,542\n");
+        // now, should be able to answer this one by rolling up gender
+        assertQueryReturns(
+            "select [Product].Children on 0\n"
+            + "from [Sales]",
+            "Axis #0:\n"
+            + "{}\n"
+            + "Axis #1:\n"
+            + "{[Product].[Drink]}\n"
+            + "{[Product].[Food]}\n"
+            + "{[Product].[Non-Consumable]}\n"
+            + "Row #0: 24,597\n"
+            + "Row #0: 191,940\n"
+            + "Row #0: 50,236\n");
+            break;
+        case 2:
+            String[] genders = {"M", "F"};
+            String[] states = {"USA", "Canada", "Mexico"};
+            for (String state : states) {
+                for (String gender : genders) {
+                    getTestContext().executeQuery(
+                        "select [Gender].[" + gender
+                        + "] * [Store].[" + state
+                        + "] * [Product].Children on 0\n"
+                        + "from [Sales]");
+                }
+            }
+        // now, should be able to answer this one by rolling up gender
+        assertQueryReturns(
+            "select [Product].Children on 0\n"
+            + "from [Sales]",
+            "Axis #0:\n"
+            + "{}\n"
+            + "Axis #1:\n"
+            + "{[Product].[Drink]}\n"
+            + "{[Product].[Food]}\n"
+            + "{[Product].[Non-Consumable]}\n"
+            + "Row #0: 24,597\n"
+            + "Row #0: 191,940\n"
+            + "Row #0: 50,236\n");
+            break;
+        case 3:
+            // Test case for MONDRIAN-1021.
+            // First, read {Mexico}.
+            // Now, query {USA, Canada, Mexico}. Should just read {USA, Canada}.
+            break;
+        case 4:
+        }
     }
 }
 

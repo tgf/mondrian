@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2006-2011 Julian Hyde and others
+// Copyright (C) 2006-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -60,14 +60,13 @@ public class SegmentColumn implements Serializable {
         this.columnExpression = columnExpression;
         this.valueCount = valueCount;
         this.values = valueList;
-        int hash = super.hashCode();
-        hash = Util.hash(hash, this.columnExpression);
-        if (this.values != null) {
-            for (Object val : this.values) {
-                hash = Util.hash(hash, val);
-            }
-        }
-        this.hashCode = hash;
+        this.hashCode = computeHashCode();
+    }
+
+    private int computeHashCode() {
+        return Util.hash(
+            this.columnExpression.hashCode(),
+            this.values);
     }
 
     /**

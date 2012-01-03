@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -47,9 +47,9 @@ import java.util.*;
 public class SegmentHeader implements Serializable {
     private static final long serialVersionUID = 8696439182886512850L;
     private final int arity;
-    private final SegmentColumn[] constrainedColumns;
-    private final SegmentColumn[] excludedRegions;
-    public final String[] compoundPredicates;
+    private final List<SegmentColumn> constrainedColumns;
+    private final List<SegmentColumn> excludedRegions;
+    public final List<String> compoundPredicates;
     public final String measureName;
     public final String cubeName;
     public final String schemaName;
@@ -76,18 +76,17 @@ public class SegmentHeader implements Serializable {
      * @param rolapStarFactTableName Star fact table name
      * @param constrainedColsBitKey Constrained columns bit key
      * @param excludedRegions Excluded regions. (Must not be null, but typically
-     * empty.)
      */
     public SegmentHeader(
         String schemaName,
         ByteString schemaChecksum,
         String cubeName,
         String measureName,
-        SegmentColumn[] constrainedColumns,
-        String[] compoundPredicates,
+        List<SegmentColumn> constrainedColumns,
+        List<String> compoundPredicates,
         String rolapStarFactTableName,
         BitKey constrainedColsBitKey,
-        SegmentColumn[] excludedRegions)
+        List<SegmentColumn> excludedRegions)
     {
         this.constrainedColumns = constrainedColumns;
         this.excludedRegions = excludedRegions;
@@ -99,9 +98,13 @@ public class SegmentHeader implements Serializable {
         this.compoundPredicates = compoundPredicates;
         this.rolapStarFactTableName = rolapStarFactTableName;
         this.constrainedColsBitKey = constrainedColsBitKey;
-        this.arity = constrainedColumns.length;
+        this.arity = constrainedColumns.size();
         // Hash code might be used extensively. Better compute
         // it up front.
+        this.hashCode = computeHashCode();
+    }
+
+    private int computeHashCode() {
         int hash = 42;
         hash = Util.hash(hash, schemaName);
         hash = Util.hash(hash, schemaChecksum);
@@ -119,10 +122,8 @@ public class SegmentHeader implements Serializable {
                 hash = Util.hashArray(hash, col.values.toArray());
             }
         }
-        for (String col : this.compoundPredicates) {
-            hash = Util.hash(hash, col);
-        }
-        this.hashCode = hash;
+        hash = Util.hash(hash, compoundPredicates);
+        return hash;
     }
 
     public int hashCode() {
@@ -133,10 +134,9 @@ public class SegmentHeader implements Serializable {
         if (!(obj instanceof SegmentHeader)) {
             return false;
         }
-        if (!excludedRegions.equals(((SegmentHeader)obj).excludedRegions)) {
-            return false;
-        }
-        return ((SegmentHeader)obj).getUniqueID().equals(this.getUniqueID());
+        final SegmentHeader that = (SegmentHeader) obj;
+        return getUniqueID().equals(that.getUniqueID())
+            && excludedRegions.equals(that.excludedRegions);
     }
 
     /**
@@ -161,12 +161,11 @@ public class SegmentHeader implements Serializable {
                 schemaChecksum,
                 cubeName,
                 measureName,
-                colsToAdd.values()
-                    .toArray(new SegmentColumn[colsToAdd.size()]),
-                new String[0],
+                new ArrayList<SegmentColumn>(colsToAdd.values()),
+                Collections.<String>emptyList(),
                 rolapStarFactTableName,
                 constrainedColsBitKey,
-                new SegmentColumn[0]);
+                Collections.<SegmentColumn>emptyList());
     }
 
     /**
@@ -187,9 +186,15 @@ public class SegmentHeader implements Serializable {
             if (ccActual != null) {
                 final SegmentColumn ccActualExcl =
                     getExcludedRegion(ccToFlush.columnExpression);
-                if ((ccActualExcl != null
+                if (ccActualExcl != null
                     && ccActualExcl.merge(ccToFlush).values == null)
-                    || ccActual.values.equals(ccToFlush.values))
+                {
+                    // This means that the whole axis is excluded.
+                    // Better destroy that segment.
+                    return false;
+                }
+                if (ccActual.values != null
+                    && ccActual.values.equals(ccToFlush.values))
                 {
                     // This means that the whole axis is excluded.
                     // Better destroy that segment.
@@ -245,8 +250,7 @@ public class SegmentHeader implements Serializable {
                 compoundPredicates,
                 rolapStarFactTableName,
                 constrainedColsBitKey,
-                newRegions.values().toArray(
-                    new SegmentColumn[newRegions.size()]));
+                new ArrayList<SegmentColumn>(newRegions.values()));
     }
 
     public String toString() {
@@ -261,33 +265,18 @@ public class SegmentHeader implements Serializable {
         return arity;
     }
 
-    public SegmentColumn[] getExcludedRegions() {
-        SegmentColumn[] copy =
-            new SegmentColumn[this.excludedRegions.length];
-        System.arraycopy(
-            excludedRegions,
-            0,
-            copy,
-            0,
-            excludedRegions.length);
-        return copy;
+    public List<SegmentColumn> getExcludedRegions() {
+        return excludedRegions;
     }
 
     /**
-     * Returns an array of constrained columns which define this segment
+     * Returns a list of constrained columns which define this segment
      * header. The caller should consider this list immutable.
-     * @return An array of ConstrainedColumns
+     *
+     * @return List of ConstrainedColumns
      */
-    public SegmentColumn[] getConstrainedColumns() {
-        SegmentColumn[] copy =
-            new SegmentColumn[this.constrainedColumns.length];
-        System.arraycopy(
-            constrainedColumns,
-            0,
-            copy,
-            0,
-            constrainedColumns.length);
-        return copy;
+    public List<SegmentColumn> getConstrainedColumns() {
+        return constrainedColumns;
     }
 
     /**

@@ -3,11 +3,13 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
 package mondrian.util;
+
+import mondrian.test.TestContext;
 
 import junit.framework.TestCase;
 
@@ -20,7 +22,7 @@ import java.util.*;
  */
 public class PartiallyOrderedSetTest extends TestCase {
     private static final boolean debug = false;
-    private final int SCALE = 250; // 100, 1000, 3000 are reasonable values
+    private final int SCALE = 250; // 100, 1000, 3000 are also reasonable values
     final long seed = new Random().nextLong();
     final Random random = new Random(seed);
 
@@ -63,6 +65,15 @@ public class PartiallyOrderedSetTest extends TestCase {
             }
         };
 
+    // Ordered by bit inclusion. E.g. the children of 14 (1110) are
+    // 12 (1100), 10 (1010) and 6 (0110).
+    static final PartiallyOrderedSet.Ordering<Integer> isBitSuperset =
+        new PartiallyOrderedSet.Ordering<Integer>() {
+            public boolean lessThan(Integer e1, Integer e2) {
+                return (e2 & e1) == e1;
+            }
+        };
+
     public PartiallyOrderedSetTest(String s) {
         super(s);
     }
@@ -73,6 +84,13 @@ public class PartiallyOrderedSetTest extends TestCase {
         PartiallyOrderedSet<String> poset =
             new PartiallyOrderedSet<String>(stringSubsetOrdering);
         assertEquals(0, poset.size());
+
+        final StringBuilder buf = new StringBuilder();
+        poset.out(buf);
+        TestContext.assertEqualsVerbose(
+            "PartiallyOrderedSet size: 0 elements: {\n"
+            + "}",
+            buf.toString());
 
         poset.add("a");
         printValidate(poset);
@@ -108,6 +126,17 @@ public class PartiallyOrderedSetTest extends TestCase {
         assertEquals("['']", poset.getChildren(bcd).toString());
         assertEquals("['abcd']", poset.getParents(bcd).toString());
         assertEquals("['ab', 'bcd']", poset.getChildren(abcd).toString());
+
+        buf.setLength(0);
+        poset.out(buf);
+        TestContext.assertEqualsVerbose(
+            "PartiallyOrderedSet size: 4 elements: {\n"
+            + "  'abcd' parents: [] children: ['ab', 'bcd']\n"
+            + "  'ab' parents: ['abcd'] children: ['']\n"
+            + "  'bcd' parents: ['abcd'] children: ['']\n"
+            + "  '' parents: ['ab', 'bcd'] children: []\n"
+            + "}",
+            buf.toString());
 
         final String b = "'b'";
 
@@ -155,6 +184,31 @@ public class PartiallyOrderedSetTest extends TestCase {
         printValidate(poset);
     }
 
+    public void testPosetBits() {
+        final PartiallyOrderedSet<Integer> poset =
+            new PartiallyOrderedSet<Integer>(isBitSuperset);
+        poset.add(2112); // {6, 11} i.e. 64 + 2048
+        poset.add(2240); // {6, 7, 11} i.e. 64 + 128 + 2048
+        poset.add(2496); // {6, 7, 8, 11} i.e. 64 + 128 + 256 + 2048
+        printValidate(poset);
+        poset.remove(2240);
+        printValidate(poset);
+        poset.add(2240); // {6, 7, 11} i.e. 64 + 128 + 2048
+        printValidate(poset);
+    }
+
+    public void testPosetBitsRemoveParent() {
+        final PartiallyOrderedSet<Integer> poset =
+            new PartiallyOrderedSet<Integer>(isBitSuperset);
+        poset.add(66); // {bit 2, bit 6}
+        poset.add(68); // {bit 3, bit 6}
+        poset.add(72); // {bit 4, bit 6}
+        poset.add(64); // {bit 6}
+        printValidate(poset);
+        poset.remove(64); // {bit 6}
+        printValidate(poset);
+    }
+
     public void testDivisorPoset() {
         PartiallyOrderedSet<Integer> integers =
             new PartiallyOrderedSet<Integer>(isDivisor, range(1, 1000));
@@ -172,13 +226,27 @@ public class PartiallyOrderedSetTest extends TestCase {
     }
 
     public void testDivisorSeries() {
-        checkPoset(isDivisor, debug, range(1, SCALE * 3));
+        checkPoset(isDivisor, debug, range(1, SCALE * 3), false);
     }
 
     public void testDivisorRandom() {
         boolean ok = false;
         try {
-            checkPoset(isDivisor, debug, random(random, SCALE, SCALE * 3));
+            checkPoset(
+                isDivisor, debug, random(random, SCALE, SCALE * 3), false);
+            ok = true;
+        } finally {
+            if (!ok) {
+                System.out.println("Random seed: " + seed);
+            }
+        }
+    }
+
+    public void testDivisorRandomWithRemoval() {
+        boolean ok = false;
+        try {
+            checkPoset(
+                isDivisor, debug, random(random, SCALE, SCALE * 3), true);
             ok = true;
         } finally {
             if (!ok) {
@@ -188,14 +256,29 @@ public class PartiallyOrderedSetTest extends TestCase {
     }
 
     public void testDivisorInverseSeries() {
-        checkPoset(isDivisorInverse, debug, range(1, SCALE * 3));
+        checkPoset(isDivisorInverse, debug, range(1, SCALE * 3), false);
     }
 
     public void testDivisorInverseRandom() {
         boolean ok = false;
         try {
             checkPoset(
-                isDivisorInverse, debug, random(random, SCALE, SCALE * 3));
+                isDivisorInverse, debug, random(random, SCALE, SCALE * 3),
+                false);
+            ok = true;
+        } finally {
+            if (!ok) {
+                System.out.println("Random seed: " + seed);
+            }
+        }
+    }
+
+    public void testDivisorInverseRandomWithRemoval() {
+        boolean ok = false;
+        try {
+            checkPoset(
+                isDivisorInverse, debug, random(random, SCALE, SCALE * 3),
+                true);
             ok = true;
         } finally {
             if (!ok) {
@@ -205,13 +288,14 @@ public class PartiallyOrderedSetTest extends TestCase {
     }
 
     public void testSubsetSeries() {
-        checkPoset(isBitSubset, debug, range(1, SCALE / 2));
+        checkPoset(isBitSubset, debug, range(1, SCALE / 2), false);
     }
 
     public void testSubsetRandom() {
         boolean ok = false;
         try {
-            checkPoset(isBitSubset, debug, random(random, SCALE / 4, SCALE));
+            checkPoset(
+                isBitSubset, debug, random(random, SCALE / 4, SCALE), false);
             ok = true;
         } finally {
             if (!ok) {
@@ -220,7 +304,7 @@ public class PartiallyOrderedSetTest extends TestCase {
         }
     }
 
-    private void printValidate(PartiallyOrderedSet<String> poset) {
+    private <E> void printValidate(PartiallyOrderedSet<E> poset) {
         if (debug) {
             dump(poset);
         }
@@ -230,12 +314,27 @@ public class PartiallyOrderedSetTest extends TestCase {
     public void checkPoset(
         PartiallyOrderedSet.Ordering<Integer> ordering,
         boolean debug,
-        Iterable<Integer> generator)
+        Iterable<Integer> generator,
+        boolean remove)
     {
         final PartiallyOrderedSet<Integer> poset =
             new PartiallyOrderedSet<Integer>(ordering);
         int n = 0;
+        int z = 0;
+        if (debug) {
+            dump(poset);
+        }
         for (int i : generator) {
+            if (remove && z++ % 2 == 0) {
+                if (debug) {
+                    System.out.println("remove " + i);
+                }
+                poset.remove(i);
+                if (debug) {
+                    dump(poset);
+                }
+                continue;
+            }
             if (debug) {
                 System.out.println("add " + i);
             }

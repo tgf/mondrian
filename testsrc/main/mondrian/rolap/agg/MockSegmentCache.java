@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -11,7 +11,6 @@ package mondrian.rolap.agg;
 
 import mondrian.olap.Util;
 import mondrian.spi.*;
-import mondrian.util.CompletedFuture;
 
 import java.io.*;
 import java.util.*;
@@ -34,19 +33,19 @@ public class MockSegmentCache implements SegmentCache {
     private final List<SegmentCacheListener> listeners =
         new CopyOnWriteArrayList<SegmentCacheListener>();
 
+    private Random rnd;
+
     private final static int maxElements = 100;
 
-    public Future<Boolean> contains(SegmentHeader header) {
-        return new CompletedFuture<Boolean>(
-            cache.containsKey(header), null);
+    public boolean contains(SegmentHeader header) {
+        return cache.containsKey(header);
     }
 
-    public Future<SegmentBody> get(SegmentHeader header) {
-        return new CompletedFuture<SegmentBody>(
-            cache.get(header), null);
+    public SegmentBody get(SegmentHeader header) {
+        return cache.get(header);
     }
 
-    public Future<Boolean> put(
+    public boolean put(
         final SegmentHeader header,
         final SegmentBody body)
     {
@@ -88,8 +87,7 @@ public class MockSegmentCache implements SegmentCache {
         }
         cache.put(header, body);
         fireSegmentCacheEvent(
-            new SegmentCache.SegmentCacheListener
-                .SegmentCacheEvent()
+            new SegmentCache.SegmentCacheListener.SegmentCacheEvent()
             {
                 public boolean isLocal() {
                     return true;
@@ -105,12 +103,21 @@ public class MockSegmentCache implements SegmentCache {
             });
         if (cache.size() > maxElements) {
             // Cache is full. pop one out at random.
-            final double index =
-                Math.floor(maxElements * Math.random());
-            cache.remove(index);
+            if (rnd == null) {
+                rnd = new Random();
+            }
+            int index = rnd.nextInt(maxElements);
+            for (Iterator<SegmentHeader> iterator = cache.keySet().iterator();
+                 iterator.hasNext();)
+            {
+                Util.discard(iterator.next());
+                if (index-- == 0) {
+                    iterator.remove();
+                    break;
+                }
+            }
             fireSegmentCacheEvent(
-                new SegmentCache.SegmentCacheListener
-                    .SegmentCacheEvent()
+                new SegmentCache.SegmentCacheListener.SegmentCacheEvent()
                 {
                     public boolean isLocal() {
                         return true;
@@ -125,19 +132,17 @@ public class MockSegmentCache implements SegmentCache {
                     }
                 });
         }
-        return new CompletedFuture<Boolean>(true, null);
+        return true;
     }
 
-    public Future<List<SegmentHeader>> getSegmentHeaders() {
-        return new CompletedFuture<List<SegmentHeader>>(
-            new ArrayList<SegmentHeader>(cache.keySet()), null);
+    public List<SegmentHeader> getSegmentHeaders() {
+        return new ArrayList<SegmentHeader>(cache.keySet());
     }
 
-    public Future<Boolean> remove(final SegmentHeader header) {
+    public boolean remove(final SegmentHeader header) {
         cache.remove(header);
         fireSegmentCacheEvent(
-            new SegmentCache.SegmentCacheListener
-                .SegmentCacheEvent()
+            new SegmentCache.SegmentCacheListener.SegmentCacheEvent()
             {
                 public boolean isLocal() {
                     return true;
@@ -151,7 +156,7 @@ public class MockSegmentCache implements SegmentCache {
                             .EventType.ENTRY_DELETED;
                 }
             });
-        return new CompletedFuture<Boolean>(true, null);
+        return true;
     }
 
     public void tearDown() {
@@ -159,12 +164,12 @@ public class MockSegmentCache implements SegmentCache {
         cache.clear();
     }
 
-    public void addListener(SegmentCacheListener l) {
-        listeners.add(l);
+    public void addListener(SegmentCacheListener listener) {
+        listeners.add(listener);
     }
 
-    public void removeListener(SegmentCacheListener l) {
-        listeners.remove(l);
+    public void removeListener(SegmentCacheListener listener) {
+        listeners.remove(listener);
     }
 
     public boolean supportsRichIndex() {
@@ -172,10 +177,10 @@ public class MockSegmentCache implements SegmentCache {
     }
 
     public void fireSegmentCacheEvent(
-        SegmentCache.SegmentCacheListener.SegmentCacheEvent evt)
+        SegmentCache.SegmentCacheListener.SegmentCacheEvent event)
     {
-        for (SegmentCacheListener l : listeners) {
-            l.handle(evt);
+        for (SegmentCacheListener listener : listeners) {
+            listener.handle(event);
         }
     }
 }

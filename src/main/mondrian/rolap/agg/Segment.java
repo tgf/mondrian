@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2002-2002 Kana Software, Inc.
-// Copyright (C) 2002-2011 Julian Hyde and others
+// Copyright (C) 2002-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -49,7 +49,7 @@ import java.util.*;
  * evalutes the query a second time, knowing that all cell values are
  * available. Finally, it releases the pins.</p>
  *
- * <p>A Segment may have a list of excluded {@link Region} objects. These are
+ * <p>A Segment may have a list of {@link ExcludedRegion} objects. These are
  * caused by cache flushing. Usually a segment is a hypercube: it is defined by
  * a set of values on each of its axes. But after a cache flush request, a
  * segment may have a rectangular 'hole', and therefore not be a hypercube
@@ -322,14 +322,17 @@ public class Segment {
          * the cell corresponding to the keys.
          */
         public boolean wouldContain(Object[] keys);
+
         /**
-         * Returns the arrity of this region.
+         * Returns the arity of this region.
          */
-        public int getArrity();
+        public int getArity();
+
         /**
          * Describes this exclusion region in a human readable way.
          */
         public void describe(StringBuilder buf);
+
         /**
          * Returns an approximation of the number of cells exceluded
          * in this region.

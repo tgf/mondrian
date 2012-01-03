@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2001-2011 Julian Hyde and others
+// Copyright (C) 2001-2012 Julian Hyde and others
 // Copyright (C) 2001-2002 Kana Software, Inc.
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
@@ -55,8 +55,6 @@ import java.util.concurrent.Future;
  */
 public class Aggregation {
 
-    private final AggregationManager aggMgr;
-
     private final List<StarPredicate> compoundPredicateList;
     private final RolapStar star;
     private final BitKey constrainedColumnsBitKey;
@@ -76,16 +74,12 @@ public class Aggregation {
     /**
      * Creates an Aggregation.
      *
-     * @param aggMgr Aggregation manager
-     *
      * @param aggregationKey the key specifying the axes, the context and
      *                       the RolapStar for this Aggregation
      */
     public Aggregation(
-        AggregationManager aggMgr,
         AggregationKey aggregationKey)
     {
-        this.aggMgr = aggMgr;
         this.compoundPredicateList = aggregationKey.getCompoundPredicateList();
         this.star = aggregationKey.getStar();
         this.constrainedColumnsBitKey =
@@ -115,14 +109,19 @@ public class Aggregation {
      * measures = {unit_sales, store_sales},
      * state = {CA, OR},
      * gender = unconstrained</pre></blockquote>
+     *
+     * @param segmentFutures List of futures wherein each statement will place
+     *                       a list of the segments it has loaded, when it
+     *                       completes
      */
-    public List<Future<SegmentWithData>> load(
+    public void load(
+        SegmentCacheManager cacheMgr,
         int cellRequestCount,
         RolapStar.Column[] columns,
-        RolapStar.Measure[] measures,
+        List<RolapStar.Measure> measures,
         StarColumnPredicate[] predicates,
-        RolapAggregationManager.PinSet pinnedSegments,
-        GroupingSetsCollector groupingSetsCollector)
+        GroupingSetsCollector groupingSetsCollector,
+        List<Future<Map<Segment, SegmentWithData>>> segmentFutures)
     {
         BitKey measureBitKey = getConstrainedColumnsBitKey().emptyCopy();
         int axisCount = columns.length;
@@ -130,7 +129,7 @@ public class Aggregation {
 
         List<Segment> segments =
             createSegments(
-                columns, measures, measureBitKey, predicates, pinnedSegments);
+                columns, measures, measureBitKey, predicates);
 
         // The constrained columns are simply the level and foreign columns
         BitKey levelBitKey = getConstrainedColumnsBitKey();
@@ -139,27 +138,24 @@ public class Aggregation {
                 segments, levelBitKey, measureBitKey, predicates, columns);
         if (groupingSetsCollector.useGroupingSets()) {
             groupingSetsCollector.add(groupingSet);
-            // Segments are loaded using group by grouping sets
-            // by CompositeBatch.loadAggregation
-            return Collections.emptyList();
         } else {
-            final SegmentLoader segmentLoader = new SegmentLoader(aggMgr);
-            return segmentLoader.load(
+            final SegmentLoader segmentLoader = new SegmentLoader(cacheMgr);
+            segmentLoader.load(
                 cellRequestCount,
                 new ArrayList<GroupingSet>(
                     Collections.singletonList(groupingSet)),
-                compoundPredicateList);
+                compoundPredicateList,
+                segmentFutures);
         }
     }
 
     private List<Segment> createSegments(
         RolapStar.Column[] columns,
-        RolapStar.Measure[] measures,
+        List<RolapStar.Measure> measures,
         BitKey measureBitKey,
-        StarColumnPredicate[] predicates,
-        RolapAggregationManager.PinSet pinnedSegments)
+        StarColumnPredicate[] predicates)
     {
-        List<Segment> segments = new ArrayList<Segment>(measures.length);
+        List<Segment> segments = new ArrayList<Segment>(measures.size());
         for (RolapStar.Measure measure : measures) {
             measureBitKey.set(measure.getBitPosition());
             Segment segment =
@@ -172,7 +168,6 @@ public class Aggregation {
                     Collections.<Segment.ExcludedRegion>emptyList(),
                     compoundPredicateList);
             segments.add(segment);
-            ((AggregationManager.PinSetImpl) pinnedSegments).add(segment);
         }
         return segments;
     }

@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2006-2011 Julian Hyde and others
+// Copyright (C) 2006-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -13,12 +13,10 @@ import mondrian.olap.*;
 import mondrian.olap.Id.Quoting;
 import mondrian.resource.MondrianResource;
 import mondrian.rolap.agg.SegmentCacheManager;
-import mondrian.rolap.cache.SegmentCacheIndexImpl;
 import mondrian.rolap.sql.MemberChildrenConstraint;
 import mondrian.server.Execution;
 import mondrian.server.Locus;
 import mondrian.spi.SegmentColumn;
-import mondrian.spi.SegmentHeader;
 import mondrian.util.ArraySortedSet;
 
 import org.eigenbase.util.property.BooleanProperty;
@@ -175,7 +173,19 @@ public class CacheControlImpl implements CacheControl {
         return new MemberCellRegion(measures, false);
     }
 
-    public void flush(CellRegion region) {
+    public void flush(final CellRegion region) {
+        Locus.execute(
+            connection,
+            "Flush",
+            new Locus.Action<Void>() {
+                public Void execute() {
+                    flushInternal(region);
+                    return null;
+                }
+            });
+    }
+
+    private void flushInternal(CellRegion region) {
         if (region instanceof EmptyCellRegion) {
             return;
         }
@@ -519,11 +529,13 @@ public class CacheControlImpl implements CacheControl {
         final SegmentCacheManager manager =
             MondrianServer.forConnection(connection)
                 .getAggregationManager().cacheMgr;
-        manager.execute(
-            new SegmentCacheManager.Command<Void>() {
-                public Void call() throws Exception {
-                    manager.segmentIndex.printCacheState(pw);
-                    return null;
+        Locus.execute(
+            Execution.NONE,
+            "CacheControlImpl.printCacheState",
+            new Locus.Action<Object>() {
+                public Object execute() {
+                    return manager.execute(
+                        new PrintCacheStateCommand(manager, pw, Locus.peek()));
                 }
             });
     }
@@ -1516,6 +1528,33 @@ public class CacheControlImpl implements CacheControl {
             for (MemberEditCommandPlus command : commandList) {
                 command.commit();
             }
+        }
+    }
+
+    private static class PrintCacheStateCommand
+        implements SegmentCacheManager.Command<Void>
+    {
+        private final SegmentCacheManager manager;
+        private final PrintWriter pw;
+        private final Locus locus;
+
+        public PrintCacheStateCommand(
+            SegmentCacheManager manager,
+            PrintWriter pw,
+            Locus locus)
+        {
+            this.manager = manager;
+            this.pw = pw;
+            this.locus = locus;
+        }
+
+        public Void call() {
+            manager.segmentIndex.printCacheState(pw);
+            return null;
+        }
+
+        public Locus getLocus() {
+            return locus;
         }
     }
 

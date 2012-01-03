@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2005-2011 Julian Hyde and others
+// Copyright (C) 2005-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -191,14 +191,19 @@ public class AggregationKey
     }
 
     /**
-     * Returns an array of compound predicates.
+     * Returns a list of compound predicates, expressed as SQL strings.
      *
-     * @return array of predicates
+     * @param star Star
+     * @param compoundPredicateList Predicate list
+     * @return list of predicate strings
      */
-    public static String[] getCompoundPredicateArray(
+    public static List<String> getCompoundPredicateStringList(
         RolapStar star,
         List<StarPredicate> compoundPredicateList)
     {
+        if (compoundPredicateList.isEmpty()) {
+            return Collections.emptyList();
+        }
         final List<String> cp = new ArrayList<String>();
         final StringBuilder buf = new StringBuilder();
         for (StarPredicate compoundPredicate : compoundPredicateList) {
@@ -209,7 +214,7 @@ public class AggregationKey
             compoundPredicate.toSql(query, buf);
             cp.add(buf.toString());
         }
-        return cp.toArray(new String[cp.size()]);
+        return cp;
     }
 }
 

@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // You must accept the terms of that agreement to use this software.
-// Copyright (C) 2011-2011 Julian Hyde
+// Copyright (C) 2011-2012 Julian Hyde
 // All Rights Reserved.
 */
 package mondrian.util;
@@ -98,7 +98,28 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
 
     @Override
     public Iterator<E> iterator() {
-        return map.keySet().iterator();
+        final Iterator<E> iterator = map.keySet().iterator();
+        return new Iterator<E>() {
+            E previous;
+
+            public boolean hasNext() {
+                return iterator.hasNext();
+            }
+
+            public E next() {
+                return previous = iterator.next();
+            }
+
+            public void remove() {
+                if (!PartiallyOrderedSet.this.remove(previous)) {
+                    // Object was not present.
+                    // Maybe they have never called 'next'?
+                    // Maybe they called 'remove' twice?
+                    // Either way, something is screwy.
+                    throw new IllegalStateException();
+                }
+            }
+        };
     }
 
     @Override
@@ -110,6 +131,36 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
     public boolean contains(Object o) {
         //noinspection SuspiciousMethodCalls
         return map.containsKey(o);
+    }
+
+    @Override
+    public boolean remove(Object o) {
+        @SuppressWarnings("SuspiciousMethodCalls")
+        final Node<E> node = map.remove(o);
+        if (node == null) {
+            return false;
+        }
+        for (int i = 0; i < node.parentList.size(); i++) {
+            Node<E> parent = node.parentList.get(i);
+            for (Node<E> child : node.childList) {
+                if (parent.e == null && child.e == null) {
+                    parent.childList.remove(node);
+                    continue;
+                }
+                replace(parent.childList, node, child);
+            }
+        }
+        for (int i = 0; i < node.childList.size(); i++) {
+            Node<E> child = node.childList.get(i);
+            for (Node<E> parent : node.parentList) {
+                if (child.e == null && parent.e == null) {
+                    child.parentList.remove(node);
+                    continue;
+                }
+                replace(child.parentList, node, parent);
+            }
+        }
+        return true;
     }
 
     /**
@@ -270,7 +321,12 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
         if (list.contains(add)) {
             list.remove(remove);
         } else {
-            list.set(list.indexOf(remove), add);
+            final int index = list.indexOf(remove);
+            if (index >= 0) {
+                list.set(index, add);
+            } else {
+                list.add(add);
+            }
         }
     }
 
@@ -528,10 +584,20 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
     }
 
     public List<E> getNonChildren() {
+        if (topNode.childList.size() == 1
+            && topNode.childList.get(0).e == null)
+        {
+            return Collections.emptyList();
+        }
         return new StripList<E>(topNode.childList);
     }
 
     public List<E> getNonParents() {
+        if (bottomNode.parentList.size() == 1
+            && bottomNode.parentList.get(0).e == null)
+        {
+            return Collections.emptyList();
+        }
         return new StripList<E>(bottomNode.parentList);
     }
 
@@ -540,8 +606,10 @@ public class PartiallyOrderedSet<E> extends AbstractSet<E>
         map.clear();
         assert topNode.parentList.isEmpty();
         topNode.childList.clear();
+        topNode.childList.add(bottomNode);
         assert bottomNode.childList.isEmpty();
         bottomNode.parentList.clear();
+        bottomNode.parentList.add(topNode);
     }
 
     /**

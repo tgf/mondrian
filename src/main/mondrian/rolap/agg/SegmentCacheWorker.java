@@ -3,7 +3,7 @@
 // This software is subject to the terms of the Eclipse Public License v1.0
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
-// Copyright (C) 2011-2011 Julian Hyde and others
+// Copyright (C) 2011-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 */
@@ -17,7 +17,6 @@ import mondrian.util.ServiceDiscovery;
 import org.apache.log4j.Logger;
 
 import java.util.*;
-import java.util.concurrent.*;
 
 /**
  * Utility class to interact with the {@link SegmentCache}.
@@ -32,17 +31,24 @@ public final class SegmentCacheWorker {
         Logger.getLogger(SegmentCacheWorker.class);
 
     private final SegmentCache cache;
-    private final int readTimeoutMillis =
-        MondrianProperties.instance().SegmentCacheReadTimeout.get();
-    private final int lookupTimeoutMillis =
-        MondrianProperties.instance().SegmentCacheLookupTimeout.get();
-    private final int writeTimeoutMillis =
-        MondrianProperties.instance().SegmentCacheWriteTimeout.get();
-    private final int scanTimeoutMillis =
-        MondrianProperties.instance().SegmentCacheScanTimeout.get();
+    private final Thread cacheMgrThread;
+    private final boolean supportsRichIndex;
 
-    public SegmentCacheWorker(SegmentCache cache) {
+    /**
+     * Creates a worker.
+     *
+     * @param cache Cache managed by this worker
+     * @param cacheMgrThread Thread that the cache manager actor is running on,
+     *                       and which therefore should not be used for
+     *                       potentially long-running calls this this cache.
+     *                       Pass null if methods can be called from any thread.
+     */
+    public SegmentCacheWorker(SegmentCache cache, Thread cacheMgrThread) {
         this.cache = cache;
+        this.cacheMgrThread = cacheMgrThread;
+
+        // no need to call checkThread(): supportsRichIndex is a fast call
+        this.supportsRichIndex = cache.supportsRichIndex();
 
         LOGGER.debug(
             "Segment cache initialized: "
@@ -112,8 +118,6 @@ public final class SegmentCacheWorker {
      *
      * <p>If no cache is configured or there is an error while
      * querying the cache, null is returned none the less.
-     * To adjust timeout values,
-     * set {@link MondrianProperties#SegmentCacheReadTimeout}
      *
      * @param header Header to search.
      * @return Either a segment body object or null if there
@@ -121,16 +125,9 @@ public final class SegmentCacheWorker {
      * for the passed header.
      */
     public SegmentBody get(SegmentHeader header) {
+        checkThread();
         try {
-            return cache.get(header)
-                .get(readTimeoutMillis, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheReadTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheReadTimeout.ex(e);
+            return cache.get(header);
         } catch (Throwable t) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -147,25 +144,16 @@ public final class SegmentCacheWorker {
      * for a given segment header.
      *
      * <p>If no cache is configured or there is an error while
-     * querying the cache, false is returned none the less.
-     * To adjust timeout values, set
-     * {@link MondrianProperties#SegmentCacheLookupTimeout}.
+     * querying the cache, returns false nonetheless.
      *
      * @param header A header to search for in the segment cache.
      * @return True or false, whether there is a segment body
      * available in a segment cache.
      */
     public boolean contains(SegmentHeader header) {
+        checkThread();
         try {
-            return cache.contains(header)
-                .get(lookupTimeoutMillis, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheLookupTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheLookupTimeout.ex(e);
+            return cache.contains(header);
         } catch (Throwable t) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -180,17 +168,13 @@ public final class SegmentCacheWorker {
      * Places a segment in the cache. Returns true or false
      * if the operation succeeds.
      *
-     * <p>To adjust timeout values, set the
-     * {@link MondrianProperties#SegmentCacheWriteTimeout} property.
-     *
      * @param header A header to search for in the segment cache.
      * @param body The segment body to cache.
      */
     public void put(SegmentHeader header, SegmentBody body) {
+        checkThread();
         try {
-            final boolean result =
-                cache.put(header, body)
-                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
+            final boolean result = cache.put(header, body);
             if (!result) {
                 LOGGER.error(
                     MondrianResource.instance()
@@ -199,13 +183,6 @@ public final class SegmentCacheWorker {
                 throw MondrianResource.instance()
                     .SegmentCacheFailedToSaveSegment.ex();
             }
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheReadTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheReadTimeout.ex(e);
         } catch (Throwable t) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -218,34 +195,15 @@ public final class SegmentCacheWorker {
     }
 
     /**
-     * Removes a segment from the cache. Returns true or false
-     * if the operation succeeds.
-     *
-     * <p>To adjust timeout values, set the
-     * {@link MondrianProperties#SegmentCacheWriteTimeout} property.
+     * Removes a segment from the cache.
      *
      * @param header A header to remove in the segment cache.
+     * @return Whether a segment was removed
      */
-    public void remove(SegmentHeader header) {
+    public boolean remove(SegmentHeader header) {
+        checkThread();
         try {
-            final boolean result =
-                cache.remove(header)
-                    .get(writeTimeoutMillis, TimeUnit.MILLISECONDS);
-            if (!result) {
-                LOGGER.error(
-                    MondrianResource.instance()
-                        .SegmentCacheFailedToDeleteSegment
-                        .baseMessage);
-                throw MondrianResource.instance()
-                    .SegmentCacheFailedToDeleteSegment.ex();
-            }
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheReadTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheReadTimeout.ex(e);
+            return cache.remove(header);
         } catch (Throwable t) {
             LOGGER.error(
                 MondrianResource.instance()
@@ -260,25 +218,12 @@ public final class SegmentCacheWorker {
     /**
      * Returns a list of segments present in the cache.
      *
-     * <p>If no cache is configured or there is an error while
-     * querying the cache, an empty list is returned none the less.
-     * To adjust timeout values, set
-     * {@link MondrianProperties#SegmentCacheScanTimeout}
-     *
-     * @return Either a list of header objects or an empty list if there
-     * was no cache configured or no segment could be found
+     * @return List of headers in the cache
      */
     public List<SegmentHeader> getSegmentHeaders() {
+        checkThread();
         try {
-            return cache.getSegmentHeaders()
-                .get(scanTimeoutMillis, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            LOGGER.error(
-                MondrianResource.instance()
-                    .SegmentCacheScanTimeout.baseMessage,
-                e);
-            throw MondrianResource.instance()
-                .SegmentCacheScanTimeout.ex(e);
+            return cache.getSegmentHeaders();
         } catch (Throwable t) {
             LOGGER.error("Failed to get a list of segment headers.", t);
             throw MondrianResource.instance()
@@ -287,11 +232,18 @@ public final class SegmentCacheWorker {
     }
 
     public boolean supportsRichIndex() {
-        return cache.supportsRichIndex();
+        return supportsRichIndex;
     }
 
     public void shutdown() {
+        checkThread();
         cache.tearDown();
+    }
+
+    private void checkThread() {
+        assert cacheMgrThread != Thread.currentThread()
+            : "this method is potentially slow; you should not call it from "
+            + "the cache manager thread, " + cacheMgrThread;
     }
 }
 
