@@ -4,7 +4,7 @@
 // Agreement, available at the following URL:
 // http://www.eclipse.org/legal/epl-v10.html.
 // Copyright (C) 2001-2002 Kana Software, Inc.
-// Copyright (C) 2001-2011 Julian Hyde and others
+// Copyright (C) 2001-2012 Julian Hyde and others
 // All Rights Reserved.
 // You must accept the terms of that agreement to use this software.
 //
@@ -20,7 +20,6 @@ import mondrian.resource.MondrianResource;
 import mondrian.rolap.RolapCube;
 import mondrian.rolap.RolapCubeDimension;
 import mondrian.rolap.RolapUtil;
-import mondrian.rolap.agg.ValueColumnPredicate;
 import mondrian.spi.UserDefinedFunction;
 import mondrian.util.*;
 
@@ -2175,6 +2174,63 @@ public class Util extends XOMUtil {
         T[] ts, int start, int end, T t)
     {
         return compatible.binarySearch(ts, start, end, t);
+    }
+
+    /**
+     * Returns the intersection of two sorted sets. Does not modify either set.
+     * 
+     * <p>Optimized for the case that both sets are {@link ArraySortedSet}.</p>
+     * 
+     * @param set1 First set
+     * @param set2 Second set
+     * @return Intersection of the sets
+    */
+    public static <E extends Comparable> SortedSet<E> intersect(
+        SortedSet<E> set1,
+        SortedSet<E> set2)
+    {
+        if (set1.isEmpty()) {
+            return set1;
+        }
+        if (set2.isEmpty()) {
+            return set2;
+        }
+        if (!(set1 instanceof ArraySortedSet)
+            || !(set2 instanceof ArraySortedSet))
+        {
+            final TreeSet<E> set = new TreeSet<E>(set1);
+            set.removeAll(set2);
+            return set;
+        }
+        final Comparable<?>[] result =
+            new Comparable[Math.min(set1.size(), set2.size())];
+        final Iterator<E> it1 = set1.iterator();
+        final Iterator<E> it2 = set2.iterator();
+        int i = 0;
+        E e1 = it1.next();
+        E e2 = it2.next();
+        for (;;) {
+            final int compare = e1.compareTo(e2);
+            if (compare == 0) {
+                result[i++] = e1;
+                if (!it1.hasNext() || !it2.hasNext()) {
+                    break;
+                }
+                e1 = it1.next();
+                e2 = it2.next();
+            } else if (compare == 1) {
+                if (!it2.hasNext()) {
+                    break;
+                }
+                e2 = it2.next();
+            } else {
+                if (!it1.hasNext()) {
+                    break;
+                }
+                e1 = it1.next();
+            }
+        }
+        return new ArraySortedSet(result, 0, i);
     }
 
     public static class ErrorCellValue {
