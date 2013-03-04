@@ -1474,6 +1474,45 @@ public class NonEmptyTest extends BatchTestCase {
             + "where ([Time].[Jan]) ");
     }
 
+    public void testCmInSlicerResults() {
+        assertQueryReturns(
+        "with member [Time].[Time].[Jan] as  "
+        + "'Aggregate({[Time].[1998].[Q1].[1], [Time].[1997].[Q1].[1]})'  "
+        + "select NON EMPTY {[Measures].[Unit Sales]} ON columns,  "
+        + "NON EMPTY [Product].Children ON rows from [Sales] "
+        + "where ([Time].[Jan]) ",
+        "Axis #0:\n"
+        + "{[Time].[Time].[Jan]}\n"
+        + "Axis #1:\n"
+        + "{[Measures].[Unit Sales]}\n"
+        + "Axis #2:\n"
+        + "{[Product].[Products].[Drink]}\n"
+        + "{[Product].[Products].[Food]}\n"
+        + "{[Product].[Products].[Non-Consumable]}\n"
+        + "Row #0: 1,910\n"
+        + "Row #1: 15,604\n"
+        + "Row #2: 4,114\n");
+    }
+
+    public void testSetInSlicerResults() {
+        assertQueryReturns(
+        "select NON EMPTY {[Measures].[Unit Sales]} ON columns,  "
+        + "NON EMPTY [Product].Children ON rows from [Sales] "
+        + "where {[Time].[1998].[Q1].[1], [Time].[1997].[Q1].[1]} ",
+        "Axis #0:\n"
+        + "{[Time].[Time].[1998].[Q1].[1]}\n"
+        + "{[Time].[Time].[1997].[Q1].[1]}\n"
+        + "Axis #1:\n"
+        + "{[Measures].[Unit Sales]}\n"
+        + "Axis #2:\n"
+        + "{[Product].[Products].[Drink]}\n"
+        + "{[Product].[Products].[Food]}\n"
+        + "{[Product].[Products].[Non-Consumable]}\n"
+        + "Row #0: 1,910\n"
+        + "Row #1: 15,604\n"
+        + "Row #2: 4,114\n");
+    }
+
     public void testCjMembersMembersMembers() {
         checkNative(
             getTestContext(),
@@ -1488,6 +1527,107 @@ public class NonEmptyTest extends BatchTestCase {
             + " from [Sales] where ("
             + "  [Store].[USA].[CA].[San Francisco].[Store 14],"
             + "  [Time].[1997].[Q1].[1])");
+    }
+
+    /**
+     * Native CrossJoin with a ranged slicer.
+     */
+    public void testNonEmptyAggregateSlicerIsNative() {
+        final String mdx =
+            "select NON EMPTY\n"
+            + " Crossjoin([Product].[Drink].[Alcoholic Beverages].[Beer and Wine].[Beer].[Portsmouth]\n"
+            + " , [Customers].[USA].[WA].[Puyallup].Children) ON COLUMNS\n"
+            + "from [Sales]\n"
+            + "where ([Time].[1997].[Q1].[2] : [Time].[1997].[Q2].[5])";
+
+        propSaver.set(propSaver.props.GenerateFormattedSql, true);
+        final String mysqlNativeCrossJoinQuery =
+            "select\n"
+            + "    `time_by_day`.`the_year` as `c0`,\n"
+//            + "    `time_by_day`.`quarter` as `c1`,\n"
+            + "    `time_by_day`.`month_of_year` as `c1`,\n"
+            + "    `product_class`.`product_family` as `c2`,\n"
+            + "    `product_class`.`product_department` as `c3`,\n"
+            + "    `product_class`.`product_category` as `c4`,\n"
+            + "    `product_class`.`product_subcategory` as `c5`,\n"
+            + "    `product`.`brand_name` as `c6`,\n"
+            + "    `customer`.`customer_id` as `c7`,\n"
+            + "    sum(`sales_fact_1997`.`unit_sales`) as `m0`\n"
+            + "from\n"
+            + "    `time_by_day` as `time_by_day`,\n"
+            + "    `sales_fact_1997` as `sales_fact_1997`,\n"
+            + "    `product_class` as `product_class`,\n"
+            + "    `product` as `product`,\n"
+            + "    `customer` as `customer`\n"
+            + "where\n"
+            + "    `sales_fact_1997`.`time_id` = `time_by_day`.`time_id`\n"
+            + "and\n"
+            + "    `time_by_day`.`the_year` = 1997\n"
+//            + "and\n"
+//            + "    `time_by_day`.`quarter` in ('Q1', 'Q2')\n"
+            + "and\n"
+            + "    `time_by_day`.`month_of_year` in (2, 3, 4, 5)\n"
+            + "and\n"
+            + "    `sales_fact_1997`.`product_id` = `product`.`product_id`\n"
+            + "and\n"
+            + "    `product`.`product_class_id` = `product_class`.`product_class_id`\n"
+            + "and\n"
+            + "    `product_class`.`product_family` = 'Drink'\n"
+            + "and\n"
+            + "    `product_class`.`product_department` = 'Alcoholic Beverages'\n"
+            + "and\n"
+            + "    `product_class`.`product_category` = 'Beer and Wine'\n"
+            + "and\n"
+            + "    `product_class`.`product_subcategory` = 'Beer'\n"
+            + "and\n"
+            + "    `product`.`brand_name` = 'Portsmouth'\n"
+            + "and\n"
+            + "    `sales_fact_1997`.`customer_id` = `customer`.`customer_id`\n"
+            + "and\n"
+            + "    `customer`.`customer_id` in (2295, 4099, 5219, 7100, 8617, 10250)\n"
+            + "group by\n"
+            + "    `time_by_day`.`the_year`,\n"
+//            + "    `time_by_day`.`quarter`,\n"
+            + "    `time_by_day`.`month_of_year`,\n"
+            + "    `product_class`.`product_family`,\n"
+            + "    `product_class`.`product_department`,\n"
+            + "    `product_class`.`product_category`,\n"
+            + "    `product_class`.`product_subcategory`,\n"
+            + "    `product`.`brand_name`,\n"
+            + "    `customer`.`customer_id`";
+
+        final String triggerSql =
+            "select\n"
+            + "    `time_by_day`.`the_year` as `c0`,\n"
+//            + "    `time_by_day`.`quarter` as `c1`,\n"
+            + "    `time_by_day`.`month_of_year` as `c1`,\n"
+            + "    `product_class`.`product_family` as `c2`,\n";
+        SqlPattern mysqlPattern =
+            new SqlPattern(
+                Dialect.DatabaseProduct.MYSQL,
+                mysqlNativeCrossJoinQuery,
+                triggerSql);
+
+        assertQuerySql(getTestContext(), mdx, new SqlPattern[]{mysqlPattern});
+
+        checkNative(
+            getTestContext(),
+            20,
+            1,
+            "select NON EMPTY\n"
+            + " Crossjoin([Product].[Drink].[Alcoholic Beverages].[Beer and Wine].[Beer].[Portsmouth]\n"
+            + " , [Customers].[USA].[WA].[Puyallup].Children) ON COLUMNS\n"
+            + "from [Sales]\n"
+            + "where ([Time].[1997].[Q1].[2] : [Time].[1997].[Q2].[5])",
+            "Axis #0:\n"
+            + "{[Time].[Time].[1997].[Q1].[2]}\n"
+            + "{[Time].[Time].[1997].[Q1].[3]}\n"
+            + "{[Time].[Time].[1997].[Q2].[4]}\n"
+            + "{[Time].[Time].[1997].[Q2].[5]}\n"
+            + "Axis #1:\n"
+            + "{[Product].[Products].[Drink].[Alcoholic Beverages].[Beer and Wine].[Beer].[Portsmouth], [Customer].[Customers].[USA].[WA].[Puyallup].[Diane Biondo]}\n"
+            + "Row #0: 2\n",
+            true);
     }
 
     public void testCjMembersWithHideIfBlankLeafAndNoAll() {

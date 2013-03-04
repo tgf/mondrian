@@ -463,6 +463,92 @@ public class AccessControlTest extends FoodMartTestCase {
             + "Row #1: 74,748\n");
     }
 
+    /**
+    * Tests for Mondrian BUG 1127 - Native Top Count was not taking into
+    * account user roles
+    */
+   public void testBugMondrian1127OneSlicerOnly() {
+       final TestContext testContext = getRestrictedTestContext();
+       testContext.assertQueryReturns(
+           "select NON EMPTY {[Measures].[Unit Sales]} ON COLUMNS, \n"
+           + "  TopCount([Store].[USA].[CA].Children, 10,"
+           + "           [Measures].[Unit Sales]) ON ROWS \n"
+           + "from [Sales] \n"
+           + "where ([Time].[1997].[Q1].[2])",
+           "Axis #0:\n"
+           + "{[Time].[Time].[1997].[Q1].[2]}\n"
+           + "Axis #1:\n"
+           + "{[Measures].[Unit Sales]}\n"
+           + "Axis #2:\n"
+           + "{[Store].[Stores].[USA].[CA].[Los Angeles]}\n"
+           + "{[Store].[Stores].[USA].[CA].[San Francisco]}\n"
+           + "Row #0: 2,614\n"
+           + "Row #1: 187\n");
+
+       final TestContext unrestrictedTestContext = getTestContext();
+       unrestrictedTestContext.assertQueryReturns(
+           "select NON EMPTY {[Measures].[Unit Sales]} ON COLUMNS, \n"
+           + "  TopCount([Store].[USA].[CA].Children, 10, "
+           + "           [Measures].[Unit Sales]) ON ROWS \n"
+           + "from [Sales] \n"
+           + "where ([Time].[1997].[Q1].[2])",
+           "Axis #0:\n"
+           + "{[Time].[Time].[1997].[Q1].[2]}\n"
+           + "Axis #1:\n"
+           + "{[Measures].[Unit Sales]}\n"
+           + "Axis #2:\n"
+           + "{[Store].[Stores].[USA].[CA].[Los Angeles]}\n"
+           + "{[Store].[Stores].[USA].[CA].[San Diego]}\n"
+           + "{[Store].[Stores].[USA].[CA].[Beverly Hills]}\n"
+           + "{[Store].[Stores].[USA].[CA].[San Francisco]}\n"
+           + "Row #0: 2,614\n"
+           + "Row #1: 1,879\n"
+           + "Row #2: 1,341\n"
+           + "Row #3: 187\n");
+   }
+
+    public void testBugMondrian1127MultipleSlicers() {
+        final TestContext testContext = getRestrictedTestContext();
+        testContext.assertQueryReturns(
+            "select NON EMPTY {[Measures].[Unit Sales]} ON COLUMNS, \n"
+            + "  TopCount([Store].[USA].[CA].Children, 10,"
+            + "           [Measures].[Unit Sales]) ON ROWS \n"
+            + "from [Sales] \n"
+            + "where ([Time].[1997].[Q1].[2] : [Time].[1997].[Q1].[3])",
+            "Axis #0:\n"
+            + "{[Time].[Time].[1997].[Q1].[2]}\n"
+            + "{[Time].[Time].[1997].[Q1].[3]}\n"
+            + "Axis #1:\n"
+            + "{[Measures].[Unit Sales]}\n"
+            + "Axis #2:\n"
+            + "{[Store].[Stores].[USA].[CA].[Los Angeles]}\n"
+            + "{[Store].[Stores].[USA].[CA].[San Francisco]}\n"
+            + "Row #0: 4,497\n"
+            + "Row #1: 337\n");
+ 
+        final TestContext unrestrictedTestContext = getTestContext();
+        unrestrictedTestContext.assertQueryReturns(
+            "select NON EMPTY {[Measures].[Unit Sales]} ON COLUMNS, \n"
+            + "  TopCount([Store].[USA].[CA].Children, 10, "
+            + "           [Measures].[Unit Sales]) ON ROWS \n"
+            + "from [Sales] \n"
+            + "where ([Time].[1997].[Q1].[2] : [Time].[1997].[Q1].[3])",
+            "Axis #0:\n"
+            + "{[Time].[Time].[1997].[Q1].[2]}\n"
+            + "{[Time].[Time].[1997].[Q1].[3]}\n"
+            + "Axis #1:\n"
+            + "{[Measures].[Unit Sales]}\n"
+            + "Axis #2:\n"
+            + "{[Store].[Stores].[USA].[CA].[Los Angeles]}\n"
+            + "{[Store].[Stores].[USA].[CA].[San Diego]}\n"
+            + "{[Store].[Stores].[USA].[CA].[Beverly Hills]}\n"
+            + "{[Store].[Stores].[USA].[CA].[San Francisco]}\n"
+            + "Row #0: 4,497\n"
+            + "Row #1: 4,094\n"
+            + "Row #2: 2,585\n"
+            + "Row #3: 337\n");
+    }
+
     public void _testSharedObjectsInGrantMappingsBug() {
         final TestContext testContext = new TestContext() {
             public Connection getConnection() {
