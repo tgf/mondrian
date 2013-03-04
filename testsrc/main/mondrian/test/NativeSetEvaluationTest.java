@@ -613,7 +613,7 @@ public class NativeSetEvaluationTest extends BatchTestCase {
         final String mdx =
             "WITH\n"
             + "  SET TC AS 'TopCount([Product].[Drink].[Alcoholic Beverages].Children, 3)'\n"
-            + "  MEMBER [Store Type].[Store Type].[Slicer] as Aggregate([Store Type].[Store Type].Members)\n"
+            + "  MEMBER [Store Type].[Store Type].[Slicer] as Aggregate([Store Type].[Store Type].[Store Type].Members)\n"
             + "\n"
             + "  SELECT NON EMPTY [Measures].[Unit Sales] on 0,\n"
             + "    TC ON 1 \n"
