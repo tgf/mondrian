@@ -419,7 +419,7 @@ public class RolapResult extends ResultBase {
                     // the slicer.
                     // Arbitrarily picks the first dim of the first tuple
                     // to use as placeholder.
-                    Member placeholder = setPlaceholderSlicerAxis(
+                    CompoundSlicerRolapMember placeholder = setPlaceholderSlicerAxis(
                         (RolapMember)tupleList.get(0).get(0), calc);
                     evaluator.setContext(placeholder);
                     if (tupleList.size() > 1 && root != null) {
@@ -427,6 +427,13 @@ public class RolapResult extends ResultBase {
                         // compound slicer; force reevaluation until we a better
                         // solution comes along
                         root.namedSetEvaluators.clear();
+                        if (isDisjointTuple(tupleList)) {
+                            // until we can handle non-balanced tuples
+                            // we should disable native
+                            LOGGER.warn("Non-balanced tuple list in slicer, disabling native evaluation!");
+                            placeholder.disjointTuple = true;
+                            //evaluator.setNativeEnabled(false);
+                        }
                     }
                 }
             } while (phase());
@@ -541,6 +548,25 @@ public class RolapResult extends ResultBase {
         }
     }
 
+    private static boolean isDisjointTuple(TupleList tupleList) {
+        List<Set<Member>> counters = new ArrayList<>(tupleList.getArity());
+        for (int i = 0; i < tupleList.size(); i++) {
+            final List<Member> tuple = tupleList.get(i);
+            for (int j=0; j < tupleList.getArity(); j++) {
+                final Member member = tuple.get(j);
+                if (i == 0) {
+                    counters.add(new HashSet<Member>());
+                }
+                counters.get(j).add(member);
+            }
+        }
+        int piatory = 1;
+        for (Set<Member> counter : counters) {
+            piatory *= counter.size();
+        }
+        return tupleList.size() < piatory;
+    }
+
     /**
      * Sets slicerAxis to a dummy placeholder RolapAxis containing
      * a single item TupleList with the null member of hierarchy.
@@ -549,7 +575,7 @@ public class RolapResult extends ResultBase {
      * the set.  This member will contain the AggregateCalc which rolls
      * up the set on the slicer.
      */
-    private Member setPlaceholderSlicerAxis(
+    private CompoundSlicerRolapMember setPlaceholderSlicerAxis(
         final RolapMember member, final Calc calc)
     {
         ValueFormatter formatter;
@@ -2255,6 +2281,7 @@ public class RolapResult extends ResultBase {
     {
         private final Calc calc;
         private final ValueFormatter valueFormatter;
+        private boolean disjointTuple;
 
         public CompoundSlicerRolapMember(
             RolapMember placeholderMember, Calc calc, ValueFormatter formatter)
@@ -2286,6 +2313,10 @@ public class RolapResult extends ResultBase {
 
         public ValueFormatter getFormatter() {
             return valueFormatter;
+        }
+
+        public boolean isDisjointTuple() {
+            return disjointTuple;
         }
     }
 }
