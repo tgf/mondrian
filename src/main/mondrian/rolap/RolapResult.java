@@ -427,13 +427,10 @@ public class RolapResult extends ResultBase {
                         // compound slicer; force reevaluation until we a better
                         // solution comes along
                         root.namedSetEvaluators.clear();
-                        if (isDisjointTuple(tupleList)) {
-                            // until we can handle non-balanced tuples
-                            // we should disable native
-                            LOGGER.warn("Non-balanced tuple list in slicer, disabling native evaluation!");
-                            placeholder.disjointTuple = true;
-                            //evaluator.setNativeEnabled(false);
-                        }
+                        placeholder.tupleList = tupleList;
+                        placeholder.disjointTuple = isDisjointTuple(tupleList);
+                        placeholder.multiLevel =
+                            hasMultipleLevelSlicer(evaluator);
                     }
                 }
             } while (phase());
@@ -549,7 +546,10 @@ public class RolapResult extends ResultBase {
     }
 
     private static boolean isDisjointTuple(TupleList tupleList) {
-        List<Set<Member>> counters = new ArrayList<>(tupleList.getArity());
+        // This assumes the same level for each hierarchy;
+        // won't work if the level restriction is eliminated
+        List<Set<Member>> counters =
+            new ArrayList<Set<Member>>(tupleList.getArity());
         for (int i = 0; i < tupleList.size(); i++) {
             final List<Member> tuple = tupleList.get(i);
             for (int j=0; j < tupleList.getArity(); j++) {
@@ -565,6 +565,16 @@ public class RolapResult extends ResultBase {
             piatory *= counter.size();
         }
         return tupleList.size() < piatory;
+    }
+    private static boolean hasMultipleLevelSlicer(Evaluator evaluator) {
+        Map<Dimension, Level> levels = new HashMap<Dimension, Level>();
+        for (Member member: ((RolapEvaluator) evaluator).getSlicerMembers()) {
+            Level before = levels.put(member.getDimension(), member.getLevel());
+            if (before != null && !before.equals(member.getLevel())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -2282,6 +2292,9 @@ public class RolapResult extends ResultBase {
         private final Calc calc;
         private final ValueFormatter valueFormatter;
         private boolean disjointTuple;
+        // if has more than one level of the same hierarchy
+        private boolean multiLevel;
+        private TupleList tupleList;
 
         public CompoundSlicerRolapMember(
             RolapMember placeholderMember, Calc calc, ValueFormatter formatter)
@@ -2317,6 +2330,14 @@ public class RolapResult extends ResultBase {
 
         public boolean isDisjointTuple() {
             return disjointTuple;
+        }
+
+        public boolean isMultiLevel() {
+            return multiLevel;
+        }
+
+        public TupleList getTupleList() {
+          return tupleList;
         }
     }
 }
