@@ -442,10 +442,6 @@ public class RolapResult extends ResultBase {
                         // compound slicer; force reevaluation until we a better
                         // solution comes along
                         root.namedSetEvaluators.clear();
-                        placeholder.tupleList = tupleList;
-                        placeholder.disjointTuple = isDisjointTuple(tupleList);
-                        placeholder.multiLevel =
-                            hasMultipleLevelSlicer(evaluator);
                     }
                 }
             } while (phase());
@@ -558,38 +554,6 @@ public class RolapResult extends ResultBase {
                 LOGGER.debug("RolapResult<init>: " + Util.printMemory());
             }
         }
-    }
-
-    private static boolean isDisjointTuple(TupleList tupleList) {
-        // This assumes the same level for each hierarchy;
-        // won't work if the level restriction is eliminated
-        List<Set<Member>> counters =
-            new ArrayList<Set<Member>>(tupleList.getArity());
-        for (int i = 0; i < tupleList.size(); i++) {
-            final List<Member> tuple = tupleList.get(i);
-            for (int j=0; j < tupleList.getArity(); j++) {
-                final Member member = tuple.get(j);
-                if (i == 0) {
-                    counters.add(new HashSet<Member>());
-                }
-                counters.get(j).add(member);
-            }
-        }
-        int piatory = 1;
-        for (Set<Member> counter : counters) {
-            piatory *= counter.size();
-        }
-        return tupleList.size() < piatory;
-    }
-    private static boolean hasMultipleLevelSlicer(Evaluator evaluator) {
-        Map<Dimension, Level> levels = new HashMap<Dimension, Level>();
-        for (Member member: ((RolapEvaluator) evaluator).getSlicerMembers()) {
-            Level before = levels.put(member.getDimension(), member.getLevel());
-            if (before != null && !before.equals(member.getLevel())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
