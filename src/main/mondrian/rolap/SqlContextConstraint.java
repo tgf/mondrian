@@ -5,7 +5,7 @@
 // You must accept the terms of that agreement to use this software.
 //
 // Copyright (C) 2004-2005 TONBELLER AG
-// Copyright (C) 2006-2014 Pentaho and others
+// Copyright (C) 2006-2015 Pentaho and others
 // All Rights Reserved.
 */
 package mondrian.rolap;
@@ -115,21 +115,7 @@ public class SqlContextConstraint
                 return false;
             }
         }
-
-        // finally, we can't handle slicer axis members with different levels
-        // from the same dimension
-        return !hasMultipleLevelSlicer(context);
-    }
-
-    private static boolean hasMultipleLevelSlicer(Evaluator evaluator) {
-        Map<Dimension, Level> levels = new HashMap<Dimension, Level>();
-        for (Member member : ((RolapEvaluator) evaluator).getSlicerMembers()) {
-            Level before = levels.put(member.getDimension(), member.getLevel());
-            if (before != null && !before.equals(member.getLevel())) {
-                return true;
-            }
-        }
-        return false;
+        return true;
     }
 
     /**
@@ -245,11 +231,11 @@ public class SqlContextConstraint
 
         // Now we'll need to expand the aggregated members
         expandedMembers.addAll(
-            Arrays.asList(
                 SqlConstraintUtils.expandSupportedCalculatedMembers(
                     members,
-                    evaluator)));
+                    evaluator));
         cacheKey.add(expandedMembers);
+        cacheKey.add(evaluator.getSlicerTuples());
 
         // Add restrictions imposed by Role based access filtering
         Map<Level, List<RolapMember>> roleMembers =

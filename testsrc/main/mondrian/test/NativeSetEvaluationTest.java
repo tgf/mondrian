@@ -1394,6 +1394,57 @@ public class NativeSetEvaluationTest extends BatchTestCase {
         assertQuerySql(mdx, new SqlPattern[]{mysqlPattern});
     }
 
+    /**
+     * This test demonstrates complex interaction between member calcs
+     * and a compound slicer
+     */
+    public void testOverridingCompoundFilter() {
+        String mdx =
+            "WITH MEMBER [Gender].[All Gender].[NoSlicer] AS '([Product].[All Products], [Time].[1997])', solve_order=1000\n "
+            + "MEMBER [Measures].[TotalVal] AS 'Aggregate(Filter({[Store].[Store City].members},[Measures].[Unit Sales] < 2300)), solve_order=900'\n"
+            + "SELECT {[Measures].[TotalVal], [Measures].[Unit Sales]} on 0, {[Gender].[All Gender], [Gender].[All Gender].[NoSlicer]} on 1 from [Sales]\n"
+            + "WHERE {([Product].[Non-Consumable], [Time].[1997].[Q1]),([Product].[Drink], [Time].[1997].[Q2])}";
+
+        TestContext context = getTestContext().withFreshConnection();
+        context.assertQueryReturns(
+            mdx,
+            "Axis #0:\n"
+            + "{[Product].[Non-Consumable], [Time].[1997].[Q1]}\n"
+            + "{[Product].[Drink], [Time].[1997].[Q2]}\n"
+            + "Axis #1:\n"
+            + "{[Measures].[TotalVal]}\n"
+            + "{[Measures].[Unit Sales]}\n"
+            + "Axis #2:\n"
+            + "{[Gender].[All Gender]}\n"
+            + "{[Gender].[All Gender].[NoSlicer]}\n"
+            + "Row #0: 12,730\n"
+            + "Row #0: 18,401\n"
+            + "Row #1: 6,557\n"
+            + "Row #1: 266,773\n");
+
+        mdx =
+            "WITH MEMBER [Gender].[All Gender].[SomeSlicer] AS '([Product].[All Products])', solve_order=1000\n "
+            + "MEMBER [Measures].[TotalVal] AS 'Aggregate(Filter({[Store].[Store City].members},[Measures].[Unit Sales] < 2700)), solve_order=900'\n"
+            + "SELECT {[Measures].[TotalVal], [Measures].[Unit Sales]} on 0, {[Gender].[All Gender], [Gender].[All Gender].[SomeSlicer]} on 1 from [Sales]\n"
+            + "WHERE {([Product].[Non-Consumable], [Time].[1997].[Q1]),([Product].[Drink], [Time].[1997].[Q2])}";
+
+        context.assertQueryReturns(
+            mdx,
+            "Axis #0:\n"
+            + "{[Product].[Non-Consumable], [Time].[1997].[Q1]}\n"
+            + "{[Product].[Drink], [Time].[1997].[Q2]}\n"
+            + "Axis #1:\n"
+            + "{[Measures].[TotalVal]}\n"
+            + "{[Measures].[Unit Sales]}\n"
+            + "Axis #2:\n"
+            + "{[Gender].[All Gender]}\n"
+            + "{[Gender].[All Gender].[SomeSlicer]}\n"
+            + "Row #0: 15,056\n"
+            + "Row #0: 18,401\n"
+            + "Row #1: 3,045\n"
+            + "Row #1: 128,901\n");
+    }
+
     public void testNativeFilterWithCompoundSlicerCJ() {
         String mdx =
             "WITH MEMBER [Measures].[TotalVal] AS 'Aggregate(Filter( {[Store].[Store City].members},[Measures].[Unit Sales] > 1000))'\n"
